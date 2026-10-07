@@ -1,0 +1,591 @@
+{
+ "model": "deepseek/deepseek-v4.1-flash",
+ "capturedAt": "2026-10-07",
+ "zdrTags": [
+  "baseten/fp8",
+  "coreweave/fp8",
+  "decart/fp4",
+  "deepinfra/fp8",
+  "dekallm",
+  "digitalocean",
+  "fireworks",
+  "fireworks/us",
+  "inference-net/fp8",
+  "ionstream",
+  "makora/fp8",
+  "modal",
+  "morph/fp8",
+  "novita/fp8",
+  "parasail/fp8",
+  "phala",
+  "relace",
+  "sail-research/fp4",
+  "siliconflow/fp8",
+  "together",
+  "venice/fp8",
+  "wafer"
+ ],
+ "endpoints": [
+  {
+   "tag": "inference-net/fp8",
+   "provider_name": "InferenceNet",
+   "quantization": "fp8",
+   "pricing": {
+    "prompt": "0.000000049",
+    "completion": "0.0000012",
+    "input_cache_read": "0.00000003",
+    "discount": 0
+   },
+   "uptime_last_1d": 99.70799314607058,
+   "uptime_last_30m": 99.93263591694405,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "tag": "relace",
+   "provider_name": "Relace",
+   "quantization": "unknown",
+   "pricing": {
+    "prompt": "0.00000005",
+    "completion": "0.0000012",
+    "input_cache_read": "0.00000002",
+    "discount": 0
+   },
+   "uptime_last_1d": 99.95525271252671,
+   "uptime_last_30m": 99.97691242111743,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "tag": "sail-research/fp4",
+   "provider_name": "Sail Research",
+   "quantization": "fp4",
+   "pricing": {
+    "prompt": "0.00000008",
+    "completion": "0.0000004",
+    "input_cache_read": "0.00000001",
+    "discount": 0
+   },
+   "uptime_last_1d": 92.57654103557591,
+   "uptime_last_30m": 99.56132443963705,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "tag": "morph/fp8",
+   "provider_name": "Morph",
+   "quantization": "fp8",
+   "pricing": {
+    "prompt": "0.000000081",
+    "completion": "0.000000424",
+    "input_cache_read": "0.000000009",
+    "discount": 0
+   },
+   "uptime_last_1d": 96.36702114094815,
+   "uptime_last_30m": 99.89812074068976,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "tag": "decart/fp4",
+   "provider_name": "Decart",
+   "quantization": "fp4",
+   "pricing": {
+    "prompt": "0.00000009",
+    "completion": "0.00000018",
+    "input_cache_read": "0.000000018",
+    "discount": 0
+   },
+   "uptime_last_1d": 96.99598742001953,
+   "uptime_last_30m": 97.942427539816,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "tag": "wafer",
+   "provider_name": "Wafer",
+   "quantization": "unknown",
+   "pricing": {
+    "prompt": "0.0000001",
+    "completion": "0.0000012",
+    "input_cache_read": "0.000000059",
+    "discount": 0
+   },
+   "uptime_last_1d": 99.89871302983315,
+   "uptime_last_30m": 99.96048055643377,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "tag": "dekallm",
+   "provider_name": "DekaLLM",
+   "quantization": "unknown",
+   "pricing": {
+    "prompt": "0.00000012",
+    "completion": "0.0000024",
+    "input_cache_read": "0.000000005",
+    "discount": 0
+   },
+   "uptime_last_1d": 73.22670299128869,
+   "uptime_last_30m": 99.91142604074402,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "tag": "ionstream",
+   "provider_name": "Ionstream",
+   "quantization": "unknown",
+   "pricing": {
+    "prompt": "0.000000133",
+    "completion": "0.00000115",
+    "input_cache_read": "0.0000000055",
+    "discount": 0
+   },
+   "uptime_last_1d": 99.28868192021423,
+   "uptime_last_30m": 99.880810488677,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "tag": "deepinfra/fp8",
+   "provider_name": "DeepInfra",
+   "quantization": "fp8",
+   "pricing": {
+    "prompt": "0.00000014",
+    "completion": "0.00000042",
+    "input_cache_read": "0.0000000042",
+    "discount": 0.3
+   },
+   "uptime_last_1d": 99.91677023455932,
+   "uptime_last_30m": 99.98367895545314,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "tag": "streamlake/fp8",
+   "provider_name": "StreamLake",
+   "quantization": "fp8",
+   "pricing": {
+    "prompt": "0.000000141",
+    "completion": "0.000000564",
+    "input_cache_read": "0.00000000282",
+    "discount": 0.53
+   },
+   "uptime_last_1d": 99.75691379527758,
+   "uptime_last_30m": 99.97263273125341,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "tag": "atlas-cloud/fp8",
+   "provider_name": "AtlasCloud",
+   "quantization": "fp8",
+   "pricing": {
+    "prompt": "0.000000141",
+    "completion": "0.000000564",
+    "input_cache_read": "0.0000000141",
+    "discount": 0
+   },
+   "uptime_last_1d": 99.68073860705982,
+   "uptime_last_30m": 96.66520534842476,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "tag": "alibaba",
+   "provider_name": "Alibaba",
+   "quantization": "unknown",
+   "pricing": {
+    "prompt": "0.00000015",
+    "completion": "0.0000006",
+    "input_cache_read": "0.000000015",
+    "discount": 0,
+    "overrides": [
+     {
+      "utc_start": 0,
+      "utc_end": 1400,
+      "prompt": "0.0000003",
+      "completion": "0.0000012",
+      "input_cache_read": "0.00000003"
+     },
+     {
+      "utc_start": 1400,
+      "utc_end": 0,
+      "prompt": "0.00000015",
+      "completion": "0.0000006",
+      "input_cache_read": "0.000000015"
+     }
+    ]
+   },
+   "uptime_last_1d": 99.2236266299398,
+   "uptime_last_30m": 99.447646493756,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "tag": "deepseek",
+   "provider_name": "DeepSeek",
+   "quantization": "unknown",
+   "pricing": {
+    "prompt": "0.00000015",
+    "completion": "0.0000006",
+    "input_cache_read": "0.000000003",
+    "discount": 0,
+    "overrides": [
+     {
+      "utc_days": [
+       "saturday",
+       "sunday"
+      ],
+      "prompt": "0.00000015",
+      "completion": "0.0000006",
+      "input_cache_read": "0.000000003"
+     },
+     {
+      "utc_start": 0,
+      "utc_end": 100,
+      "utc_days": [
+       "monday",
+       "tuesday",
+       "wednesday",
+       "thursday",
+       "friday"
+      ],
+      "prompt": "0.00000015",
+      "completion": "0.0000006",
+      "input_cache_read": "0.000000003"
+     },
+     {
+      "utc_start": 100,
+      "utc_end": 400,
+      "utc_days": [
+       "monday",
+       "tuesday",
+       "wednesday",
+       "thursday",
+       "friday"
+      ],
+      "prompt": "0.0000003",
+      "completion": "0.0000012",
+      "input_cache_read": "0.000000006"
+     },
+     {
+      "utc_start": 400,
+      "utc_end": 600,
+      "utc_days": [
+       "monday",
+       "tuesday",
+       "wednesday",
+       "thursday",
+       "friday"
+      ],
+      "prompt": "0.00000015",
+      "completion": "0.0000006",
+      "input_cache_read": "0.000000003"
+     },
+     {
+      "utc_start": 600,
+      "utc_end": 1000,
+      "utc_days": [
+       "monday",
+       "tuesday",
+       "wednesday",
+       "thursday",
+       "friday"
+      ],
+      "prompt": "0.0000003",
+      "completion": "0.0000012",
+      "input_cache_read": "0.000000006"
+     },
+     {
+      "utc_start": 1000,
+      "utc_end": 0,
+      "utc_days": [
+       "monday",
+       "tuesday",
+       "wednesday",
+       "thursday",
+       "friday"
+      ],
+      "prompt": "0.00000015",
+      "completion": "0.0000006",
+      "input_cache_read": "0.000000003"
+     }
+    ]
+   },
+   "uptime_last_1d": 99.9939678040969,
+   "uptime_last_30m": 99.99872116765918,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "tag": "digitalocean",
+   "provider_name": "DigitalOcean",
+   "quantization": "unknown",
+   "pricing": {
+    "prompt": "0.00000018",
+    "completion": "0.00000072",
+    "input_cache_read": "0.000000006",
+    "discount": 0
+   },
+   "uptime_last_1d": 99.8230388137394,
+   "uptime_last_30m": 99.85833261784151,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "tag": "gmicloud/fp8",
+   "provider_name": "GMICloud",
+   "quantization": "fp8",
+   "pricing": {
+    "prompt": "0.00000018",
+    "completion": "0.00000072",
+    "input_cache_read": "0.0000000036",
+    "discount": 0.4
+   },
+   "uptime_last_1d": 96.75356932587577,
+   "uptime_last_30m": 100,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "tag": "novita/fp8",
+   "provider_name": "Novita",
+   "quantization": "fp8",
+   "pricing": {
+    "prompt": "0.000000195",
+    "completion": "0.00000078",
+    "input_cache_read": "0.0000000039",
+    "discount": 0.35
+   },
+   "uptime_last_1d": 98.84536368068191,
+   "uptime_last_30m": 99.49257441601209,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "tag": "coreweave/fp8",
+   "provider_name": "CoreWeave",
+   "quantization": "fp8",
+   "pricing": {
+    "prompt": "0.0000002",
+    "completion": "0.00000065",
+    "input_cache_read": "0.00000003",
+    "discount": 0
+   },
+   "uptime_last_1d": 98.99160538416324,
+   "uptime_last_30m": 97.70661157024793,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "tag": "phala",
+   "provider_name": "Phala",
+   "quantization": "unknown",
+   "pricing": {
+    "prompt": "0.00000021",
+    "completion": "0.00000084",
+    "input_cache_read": "0.0000000042",
+    "discount": 0.3
+   },
+   "uptime_last_1d": 97.16393004707703,
+   "uptime_last_30m": 99.38725490196079,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "tag": "makora/fp8",
+   "provider_name": "Makora",
+   "quantization": "fp8",
+   "pricing": {
+    "prompt": "0.00000027",
+    "completion": "0.00000115",
+    "input_cache_read": "0.000000009",
+    "discount": 0
+   },
+   "uptime_last_1d": 99.77562363694503,
+   "uptime_last_30m": 97.94899370102934,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "tag": "baidu/fp8",
+   "provider_name": "Baidu",
+   "quantization": "fp8",
+   "pricing": {
+    "prompt": "0.0000003",
+    "completion": "0.0000012",
+    "input_cache_read": "0.000000006",
+    "discount": 0
+   },
+   "uptime_last_1d": 99.67634581626682,
+   "uptime_last_30m": 99.933818663137,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "tag": "baseten/fp8",
+   "provider_name": "BaseTen",
+   "quantization": "fp8",
+   "pricing": {
+    "prompt": "0.0000003",
+    "completion": "0.0000012",
+    "input_cache_read": "0.000000007",
+    "discount": 0
+   },
+   "uptime_last_1d": 99.86351147744395,
+   "uptime_last_30m": 100,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "tag": "together",
+   "provider_name": "Together",
+   "quantization": "unknown",
+   "pricing": {
+    "prompt": "0.0000003",
+    "completion": "0.0000012",
+    "input_cache_read": "0.000000006",
+    "discount": 0
+   },
+   "uptime_last_1d": 99.89802554334803,
+   "uptime_last_30m": 99.97119802500742,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "tag": "siliconflow/fp8",
+   "provider_name": "SiliconFlow",
+   "quantization": "fp8",
+   "pricing": {
+    "prompt": "0.0000003",
+    "completion": "0.0000012",
+    "input_cache_read": "0.000000006",
+    "discount": 0
+   },
+   "uptime_last_1d": 99.65078915036386,
+   "uptime_last_30m": 99.94452662721893,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "tag": "modal",
+   "provider_name": "Modal",
+   "quantization": "unknown",
+   "pricing": {
+    "prompt": "0.0000003",
+    "completion": "0.0000012",
+    "input_cache_read": "0.00000003",
+    "discount": 0
+   },
+   "uptime_last_1d": 99.92057899702618,
+   "uptime_last_30m": 100,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "tag": "baseten/fp8",
+   "provider_name": "BaseTen",
+   "quantization": "fp8",
+   "pricing": {
+    "prompt": "0.0000003",
+    "completion": "0.0000012",
+    "input_cache_read": "0.000000007",
+    "discount": 0
+   },
+   "uptime_last_1d": 99.94969247496795,
+   "uptime_last_30m": 100,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "tag": "parasail/fp8",
+   "provider_name": "Parasail",
+   "quantization": "fp8",
+   "pricing": {
+    "prompt": "0.0000003",
+    "completion": "0.0000012",
+    "input_cache_read": "0.000000006",
+    "discount": 0
+   },
+   "uptime_last_1d": 99.03084097112229,
+   "uptime_last_30m": 99.93723324127542,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "tag": "fireworks",
+   "provider_name": "Fireworks",
+   "quantization": "unknown",
+   "pricing": {
+    "prompt": "0.0000003",
+    "completion": "0.0000012",
+    "input_cache_read": "0.000000006",
+    "discount": 0
+   },
+   "uptime_last_1d": 75.41236259487147,
+   "uptime_last_30m": 98.26747844563396,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "tag": "venice/fp8",
+   "provider_name": "Venice",
+   "quantization": "fp8",
+   "pricing": {
+    "prompt": "0.0000003",
+    "completion": "0.0000012",
+    "input_cache_read": "0.0000000075",
+    "discount": 0
+   },
+   "uptime_last_1d": 99.1587307917544,
+   "uptime_last_30m": 99.77386934673366,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  },
+  {
+   "tag": "fireworks/us",
+   "provider_name": "Fireworks",
+   "quantization": "unknown",
+   "pricing": {
+    "prompt": "0.00000045",
+    "completion": "0.0000018",
+    "input_cache_read": "0.000000009",
+    "discount": 0
+   },
+   "uptime_last_1d": 97.72322834106745,
+   "uptime_last_30m": 98.54085603112841,
+   "throughput_last_30m": null,
+   "status": 0,
+   "model_id": "deepseek/deepseek-v4.1-flash"
+  }
+ ]
+}

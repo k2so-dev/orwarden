@@ -1,0 +1,14 @@
+{
+  "name": "rerouter",
+  "private": true,
+  "type": "module",
+  "workspaces": ["server", "web"],
+  "scripts": {
+    "dev:server": "bun run --cwd server dev",
+    "dev:web": "bun run --cwd web dev",
+    "build": "bun run --cwd web build",
+    "start": "bun run --cwd server start",
+    "test": "bun run --cwd server test",
+    "typecheck": "bun run --cwd server typecheck && bun run --cwd web typecheck"
+  }
+}

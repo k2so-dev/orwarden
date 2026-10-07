@@ -1,0 +1,13 @@
+services:
+  rerouter:
+    image: oven/bun:1
+    working_dir: /app
+    command: ["sh", "-c", "bun install --frozen-lockfile && bun run build && bun run start"]
+    env_file: .env
+    environment:
+      DATA_DIR: /app/data
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${PORT:-3000}:${PORT:-3000}"
+    volumes:
+      - .:/app
+    restart: unless-stopped
