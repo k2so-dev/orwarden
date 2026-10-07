@@ -1,3 +1,4 @@
+import { matchScore } from "./core/search.ts";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -164,7 +165,6 @@ export function createApp(rt: Runtime) {
     })
     .get("/catalog", zValidator("query", z.object({ q: z.string().max(100).default(""), limit: z.coerce.number().int().min(1).max(200).default(50) })), (c) => {
       const { q, limit } = c.req.valid("query");
-      const needle = q.toLowerCase();
       const usage = new Map(rt.requireSnapshot().models.map((m) => [m.slug, m.usageUsd]));
       const tracked = new Set(usage.keys());
       const watch = new Set(rt.settings().watchlist.map((w) => w.slug));
@@ -172,10 +172,12 @@ export function createApp(rt: Runtime) {
         rt
           .requireSnapshot()
           .catalog.filter((m) => !m.id.startsWith("~"))
-          .filter((m) => !needle || m.id.toLowerCase().includes(needle) || m.name.toLowerCase().includes(needle))
-          .map((m) => ({ ...m, tracked: tracked.has(m.id), watched: watch.has(m.id), usageUsd: usage.get(m.id) ?? 0 }))
-          .sort((a, b) => b.usageUsd - a.usageUsd)
-          .slice(0, limit),
+          .map((m) => ({ m, score: matchScore(q, m.id, m.name) }))
+          .filter((x): x is { m: (typeof x)["m"]; score: number } => x.score !== null)
+          .map(({ m, score }) => ({ ...m, tracked: tracked.has(m.id), watched: watch.has(m.id), usageUsd: usage.get(m.id) ?? 0, score }))
+          .sort((a, b) => b.usageUsd - a.usageUsd || b.score - a.score || a.id.length - b.id.length)
+          .slice(0, limit)
+          .map(({ score: _, ...m }) => m),
       );
     })
     .get("/overview", zValidator("query", ViewQuerySchema), (c) =>

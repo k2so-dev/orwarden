@@ -76,7 +76,7 @@ watch(
   { immediate: true },
 );
 const shown = computed(() =>
-  [...results.value].sort((a, b) => Number(selected.value.has(b.id)) - Number(selected.value.has(a.id)) || b.usageUsd - a.usageUsd || a.id.localeCompare(b.id)),
+  [...results.value].sort((a, b) => Number(selected.value.has(b.id)) - Number(selected.value.has(a.id))),
 );
 
 const card = "flex flex-col gap-1.5 rounded-xl border border-border bg-card p-4";
