@@ -1,53 +1,139 @@
 <script setup lang="ts" vapor>
 import { computed, ref } from "vue";
-import { toast } from "vue-sonner";
+import DeltaChip from "@/components/app/DeltaChip.vue";
 import StatusBadge, { type BadgeKind } from "@/components/app/StatusBadge.vue";
+import Tip from "@/components/app/Tip.vue";
 import Toggle from "@/components/app/Toggle.vue";
 import { client, unwrap, type PresetView } from "@/lib/api";
 import { copy } from "@/lib/clipboard";
-import { money, pct, price, uptime } from "@/lib/format";
+import { dateTime, money, pct, periodLabel, price, signedMoney, signedPct, uptime } from "@/lib/format";
+import type { TipLine, Tone } from "@/lib/issues";
+import { TONE_CLASS } from "@/lib/issues";
 import { cn } from "@/lib/utils";
-import { act, dryRun, reloadAfterWrite } from "@/stores/data";
-import { filters } from "@/stores/filters";
+import { act, dryRun, previewOnly, reloadAfterWrite } from "@/stores/data";
+import { scenarioLabel, viewQuery } from "@/stores/filters";
+import { notify } from "@/stores/toast";
+
+type Row = PresetView["ranked"][number];
 
 const props = defineProps<{ preset: PresetView }>();
 
-const STATUS: Record<PresetView["status"], { kind: BadgeKind; text: string }> = {
+const status = computed(() => (props.preset.status === "unknown" ? "not-created" : props.preset.status));
+const STATUS: Record<string, { kind: BadgeKind; text: string }> = {
   "up-to-date": { kind: "ok", text: "Up to date" },
   "out-of-date": { kind: "warn", text: "Out of date" },
   "not-created": { kind: "mute", text: "Not created" },
   empty: { kind: "bad", text: "Cannot build" },
-  unknown: { kind: "mute", text: "Unknown" },
 };
+const badge = computed(() => STATUS[status.value]!);
+const note = computed(() => {
+  const p = props.preset;
+  if (status.value === "up-to-date") return p.syncedAt ? `Synced ${dateTime(p.syncedAt, ", ")} · matches current ranking` : "Matches current ranking";
+  if (status.value === "out-of-date") return "Provider order changed since last sync";
+  if (status.value === "empty") return "No eligible endpoints";
+  return "Not on OpenRouter yet";
+});
 
-const blocked = computed(() => props.preset.status === "empty");
-const badge = computed(() => STATUS[props.preset.status]);
+const blocked = computed(() => status.value === "empty");
+const min = computed(() => props.preset.policy.minQuantization);
 const jsonOpen = ref(false);
 const json = computed(() => JSON.stringify(props.preset.config, null, 2));
 const busy = ref(false);
+const days = computed(() => props.preset.horizonDays);
+const current = computed(() => props.preset.profile.name);
+
+const usd = (v: number | null | undefined) => (v === null || v === undefined ? "—" : `$${price(v)}`);
+const quantKind = (q: string): BadgeKind => (!props.preset.openWeights ? "none" : q === "fp4" || q === "int4" ? "bad" : q === "unknown" ? "warn" : "out");
+const quantText = (q: string) => (props.preset.openWeights ? q : "closed");
+
+function effTone(e: Row): Tone {
+  if (e.vsCheapest === null) return "fg";
+  if (e.vsCheapest < 0.005) return "ok";
+  if (e.vsCheapest > 0.5) return "bad";
+  if (e.vsCheapest > 0.2) return "warn";
+  return "fg";
+}
+
+function rowTip(e: Row): TipLine[] {
+  const p = props.preset.profile;
+  return [
+    { text: `Blend: ${pct(1 - p.h)} × in ${usd(e.pIn)} + ${pct(p.h)} × cache ${e.cacheKnown ? usd(e.pCache) : "n/a"} + ${p.r.toFixed(2)} × out ${usd(e.pOut)} = ${usd(e.costPerM)}`, tone: "fg" },
+    { text: `Uptime ${uptime(e.uptime)} → effective ${usd(e.effectivePerM)} per 1M input`, tone: "fg" },
+    { text: `Expected share ${pct(e.share, 1)} → ${money(e.costHorizon)} / ${periodLabel(days.value)}`, tone: "muted" },
+    { text: e.vsCheapest === null ? "No cheaper reference" : e.vsCheapest < 0.005 ? "Cheapest eligible endpoint" : `${signedPct(e.vsCheapest)} vs cheapest eligible`, tone: effTone(e) === "fg" ? "muted" : effTone(e) },
+    { text: `Score ${Math.round(e.overall)}${e.pinned ? " · pinned" : ""}`, tone: "muted" },
+  ];
+}
+
+const effectiveTip: TipLine[] = [
+  { text: "Price per 1M input tokens for this scenario: uncached input + cached input + output at the scenario's output/input ratio.", tone: "fg" },
+  { text: "Divided by uptime, since failed requests fall through to the next provider.", tone: "muted" },
+];
+const shareTip: TipLine[] = [
+  { text: "Expected share of requests under the preset's fallback order: each endpoint gets what the ones above it fail to serve.", tone: "fg" },
+];
+
+const leader = computed(() => props.preset.ranked[0] ?? null);
+const leaderPremium = computed(() => {
+  const l = leader.value;
+  const c = props.preset.cheapest;
+  if (!l || !c || l.tag === c.tag || l.vsCheapest === null || l.vsCheapest < 0.005) return null;
+  return l.vsCheapest;
+});
+const leaderNote = computed(() => {
+  const l = leader.value;
+  const c = props.preset.cheapest;
+  if (leaderPremium.value === null || !l || !c) return "";
+  const why = props.preset.rankBy === "score"
+    ? "Ranking weighs speed and reliability too; set Preset ranking to “Cheapest effective” in Settings to rank by price."
+    : "It ranks first on uptime-adjusted price or because it is pinned.";
+  return `#1 ${l.providerName} costs ${signedPct(leaderPremium.value)} more than the cheapest eligible endpoint (${c.providerName}). ${why}`;
+});
+
+const perMDelta = computed(() => {
+  const { default: d, preset: p } = props.preset.perM;
+  return d && p !== null ? p / d - 1 : null;
+});
+
+const scenarios = computed(() =>
+  props.preset.scenarios.map((s) => {
+    const delta = s.default !== null && s.preset !== null ? s.preset - s.default : null;
+    return {
+      name: s.name,
+      label: scenarioLabel(s.name),
+      current: s.name === current.value,
+      def: money(s.default),
+      pre: s.preset === null ? "no preset" : money(s.preset),
+      rel: delta !== null && s.default ? delta / s.default : null,
+      month: delta === null ? "—" : signedMoney((delta * 30) / days.value),
+      monthTone: delta === null || Math.abs(delta) < 0.005 ? "text-muted-foreground" : delta < 0 ? "text-ok" : "text-bad",
+    };
+  }),
+);
 
 const policies = computed(() => {
   const p = props.preset.policy;
   return [
-    `${filters.value.minQuant}+ only`,
-    p.zdr ? "ZDR only" : "ZDR not required",
-    p.tools ? "Tools required" : "Tools optional",
-    p.fallbacks ? "Fallbacks allowed" : "No fallbacks",
+    ...(min.value ? [`${min.value}+ only`] : []),
+    ...(p.zdr ? ["ZDR"] : []),
+    ...(p.fallbacks ? ["fallbacks within list"] : []),
+    ...(p.tools ? ["tools required"] : []),
+    props.preset.rankBy === "cost" ? "ranked by effective price" : "ranked by score",
   ];
 });
 
-const savingsClass = computed(() => ((props.preset.cost.saving ?? 0) <= 0 ? "text-ok" : "text-warn"));
+const savingsClass = computed(() => ((props.preset.cost.saving ?? 0) <= 0 ? "text-ok" : "text-bad"));
 const savings = computed(() => {
   const c = props.preset.cost;
-  if (c.saving === null || c.savingPct === null) return "";
-  const cheaper = c.saving <= 0;
-  return `${cheaper ? "Saves" : "Costs"} ${money(Math.abs(c.saving))} (${pct(Math.abs(c.savingPct))}) ${cheaper ? "vs" : "more than"} default routing`;
+  if (c.saving === null) return "";
+  return `vs default routing: ${signedMoney(c.saving)} / ${days.value}d (${signedPct(c.savingPct)}) · ${scenarioLabel(current.value).toLowerCase()}`;
 });
 
 const actionLabel = computed(() => {
-  const create = props.preset.status === "not-created";
-  if (dryRun.value) return create ? "Preview create" : "Preview update";
-  return create ? "Create preset" : "Update preset";
+  if (dryRun.value) return "Preview";
+  if (status.value === "not-created") return "Create preset";
+  if (status.value === "out-of-date") return "Update preset";
+  return "Re-sync";
 });
 
 async function patch(body: { autoSync?: boolean; pinned?: string[] }) {
@@ -62,17 +148,20 @@ function togglePin(tag: string) {
 
 async function sync() {
   busy.value = true;
-  const res = await act(() => unwrap(client.presets.sync.$post({ json: { models: [props.preset.model], dryRun: dryRun.value } })));
+  const created = status.value === "not-created";
+  const res = await act(() => unwrap(client.presets.sync.$post({ json: { models: [props.preset.model], view: viewQuery.value, dryRun: dryRun.value } })));
   busy.value = false;
   const r = res?.[0];
   if (!r) return;
-  if (r.status === "failed") toast.error(r.error ?? "Sync failed");
-  else if (r.status === "planned") toast.info(`Would write ${r.slug}`);
-  else toast.success(r.status === "synced" ? `Preset ${r.slug} saved` : `Skipped ${r.slug}`);
+  if (r.status === "failed") notify("Write failed", r.error ?? r.slug, "err");
+  else if (r.status === "planned") previewOnly();
+  else if (r.status === "skipped") notify("Nothing to sync", r.error ?? `@preset/${r.slug}`, "info");
+  else notify(created ? "Preset created" : "Preset updated", `@preset/${r.slug}`);
   await reloadAfterWrite();
 }
 
-const GRID = "grid grid-cols-[28px_22px_minmax(0,1fr)_72px_70px_64px_52px_36px] items-center gap-1.5";
+const GRID = "grid grid-cols-[20px_minmax(0,1fr)_60px_50px_50px_50px_70px_48px_56px_36px_28px] items-center gap-1.5";
+const SCEN_GRID = "grid grid-cols-[minmax(0,1fr)_80px_88px_56px_92px] items-center gap-2";
 </script>
 
 <template>
@@ -81,7 +170,7 @@ const GRID = "grid grid-cols-[28px_22px_minmax(0,1fr)_72px_70px_64px_52px_36px] 
       <div class="flex items-start justify-between gap-3">
         <div>
           <div class="text-[15px] font-semibold">{{ preset.name }}</div>
-          <div class="text-xs text-muted-foreground">{{ preset.model }} · {{ preset.eligibleCount }} eligible endpoints</div>
+          <div class="text-xs text-muted-foreground">{{ note }}</div>
         </div>
         <StatusBadge :kind="badge.kind" class="h-[22px] text-[11.5px]">{{ badge.text }}</StatusBadge>
       </div>
@@ -96,41 +185,86 @@ const GRID = "grid grid-cols-[28px_22px_minmax(0,1fr)_72px_70px_64px_52px_36px] 
 
     <div v-if="blocked" class="mx-4 mb-3.5 flex gap-2 rounded-lg bg-bad-bg px-3 py-2.5 text-[13px] text-bad">
       <svg class="mt-px size-[15px] flex-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"></path><path d="M12 9v4M12 17h.01"></path></svg>
-      <span>
+      <span v-if="min">
+        <b class="font-semibold">No {{ min }}+ provider.</b>
+        <span class="text-foreground"> Every endpoint serves lower or undisclosed quantization or fails the quality filters, so a safe preset cannot be built. Lower min quantization or wait for a new provider.</span>
+      </span>
+      <span v-else>
         <b class="font-semibold">No eligible provider.</b>
-        <span class="text-foreground"> Every endpoint fails the quality filters, so a safe preset cannot be built. Lower min quantization or wait for a new provider.</span>
+        <span class="text-foreground"> Every endpoint fails the quality filters, so a safe preset cannot be built. Relax the filters or wait for a new provider.</span>
       </span>
     </div>
 
     <template v-else>
       <div class="tnum border-t border-border text-[12.5px]">
         <div :class="[GRID, 'h-[30px] border-b border-border px-2.5 text-[11.5px] font-medium text-muted-foreground']">
-          <span></span><span>#</span><span>Provider</span><span>Quant</span><span class="text-right">$ / 1M in</span><span class="text-right">Uptime</span><span class="text-right">tok/s</span><span></span>
+          <span>#</span><span>Provider</span><span>Quant</span>
+          <span class="text-right">In</span><span class="text-right">Out</span><span class="text-right">Cache</span>
+          <span class="flex justify-end"><Tip title="Effective $ / 1M input" :lines="effectiveTip">Effective<svg class="ml-1 size-3 self-center" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4M12 8h.01"></path></svg></Tip></span>
+          <span class="flex justify-end"><Tip title="Traffic share" :lines="shareTip">Share<svg class="ml-1 size-3 self-center" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4M12 8h.01"></path></svg></Tip></span>
+          <span class="text-right">Uptime</span><span class="text-right">tok/s</span><span></span>
         </div>
         <div v-for="e in preset.ranked" :key="e.tag" :class="[GRID, 'h-[38px] border-b border-border px-2.5']">
-          <span class="grid place-items-center text-muted-foreground">
-            <svg class="size-3.5" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="5" r="1.5"></circle><circle cx="9" cy="12" r="1.5"></circle><circle cx="9" cy="19" r="1.5"></circle><circle cx="15" cy="5" r="1.5"></circle><circle cx="15" cy="12" r="1.5"></circle><circle cx="15" cy="19" r="1.5"></circle></svg>
-          </span>
           <span class="font-semibold">{{ e.rank }}</span>
           <span class="flex min-w-0 items-baseline gap-1.5 overflow-hidden whitespace-nowrap">
             <span class="font-medium">{{ e.providerName }}</span>
-            <span class="font-mono text-[11px] text-muted-foreground">{{ e.tag }}</span>
+            <span class="truncate font-mono text-[11px] text-muted-foreground">{{ e.tag }}</span>
           </span>
-          <span><StatusBadge kind="ok">{{ e.quantization }}</StatusBadge></span>
-          <span class="text-right font-medium">{{ price(e.costPerM) }}</span>
+          <span><StatusBadge :kind="quantKind(e.quantization)">{{ quantText(e.quantization) }}</StatusBadge></span>
+          <span class="text-right">{{ usd(e.pIn) }}</span>
+          <span class="text-right">{{ usd(e.pOut) }}</span>
+          <span :class="['text-right', !e.cacheKnown && 'text-muted-foreground']">{{ e.cacheKnown ? usd(e.pCache) : "—" }}</span>
+          <span class="flex justify-end">
+            <Tip :title="`${e.providerName} · ${scenarioLabel(current)}`" :lines="rowTip(e)" :class="cn('font-semibold', TONE_CLASS[effTone(e)])">{{ usd(e.effectivePerM) }}</Tip>
+          </span>
+          <span class="text-right">{{ e.share > 0 && e.share < 0.001 ? "<0.1%" : pct(e.share, e.share < 0.1 && e.share >= 0.001 ? 1 : 0) }}</span>
           <span class="text-right">{{ uptime(e.uptime) }}</span>
           <span class="text-right">{{ e.tps === null ? "—" : Math.round(e.tps) }}</span>
           <button
             type="button"
             title="Pin provider"
-            :aria-pressed="preset.pinned.includes(e.tag)"
-            :class="cn('grid size-7 place-items-center rounded-md', preset.pinned.includes(e.tag) ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent')"
+            :aria-pressed="e.pinned"
+            :class="cn('grid size-7 place-items-center rounded-md', e.pinned ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-accent')"
             @click="togglePin(e.tag)"
           >
             <svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect width="18" height="11" x="3" y="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
           </button>
         </div>
       </div>
+
+      <div class="tnum grid grid-cols-3 gap-3 px-4 pt-3">
+        <div class="flex flex-col gap-0.5">
+          <span class="text-[11.5px] font-medium text-muted-foreground">Preset · $ / 1M input</span>
+          <span class="flex items-baseline gap-1.5"><span class="text-[17px] font-semibold">{{ usd(preset.perM.preset) }}</span><DeltaChip :value="perMDelta" /></span>
+        </div>
+        <div class="flex flex-col gap-0.5">
+          <span class="text-[11.5px] font-medium text-muted-foreground">Default routing</span>
+          <span class="text-[17px] font-semibold">{{ usd(preset.perM.default) }}</span>
+        </div>
+        <div class="flex min-w-0 flex-col gap-0.5">
+          <span class="text-[11.5px] font-medium text-muted-foreground">Cheapest of {{ preset.eligibleCount }} eligible</span>
+          <span class="flex min-w-0 items-baseline gap-1.5">
+            <span class="text-[17px] font-semibold">{{ usd(preset.cheapest?.costPerM) }}</span>
+            <span class="truncate text-xs text-muted-foreground">{{ preset.cheapest?.providerName }}</span>
+          </span>
+        </div>
+      </div>
+      <div v-if="leaderNote" class="mx-4 mt-2.5 rounded-lg bg-warn-bg px-3 py-2 text-[12.5px] text-warn">{{ leaderNote }}</div>
+
+      <div class="tnum mx-4 mt-3 rounded-lg border border-border text-[12.5px]">
+        <div :class="[SCEN_GRID, 'h-[30px] border-b border-border px-3 text-[11.5px] font-medium text-muted-foreground']">
+          <span>Cost by scenario · {{ periodLabel(days) }}</span>
+          <span class="text-right">Default</span><span class="text-right">Preset</span><span class="text-right">Δ</span><span class="text-right">Δ / 30 days</span>
+        </div>
+        <div v-for="s in scenarios" :key="s.name" :class="[SCEN_GRID, 'h-8 border-b border-border px-3 last:border-b-0', s.current && 'font-semibold']">
+          <span class="truncate">{{ s.label }}</span>
+          <span class="text-right">{{ s.def }}</span>
+          <span :class="['text-right', s.pre === 'no preset' && 'text-muted-foreground']">{{ s.pre }}</span>
+          <span class="flex justify-end"><DeltaChip :value="s.rel" /></span>
+          <span :class="['text-right', s.monthTone]">{{ s.month }}</span>
+        </div>
+      </div>
+
       <div class="flex flex-wrap gap-1.5 px-4 pt-3">
         <span v-for="p in policies" :key="p" class="inline-flex h-[22px] items-center rounded-full border border-border px-2 text-[11.5px] font-medium">{{ p }}</span>
       </div>
@@ -150,7 +284,7 @@ const GRID = "grid grid-cols-[28px_22px_minmax(0,1fr)_72px_70px_64px_52px_36px] 
           v-else
           type="button"
           :disabled="busy"
-          :class="cn('h-[30px] rounded-lg px-3 text-[12.5px] font-medium', preset.status === 'up-to-date' ? 'border border-border bg-background' : 'bg-primary text-primary-foreground')"
+          :class="cn('h-[30px] rounded-lg px-3 text-[12.5px] font-medium disabled:opacity-50', status === 'up-to-date' && !dryRun ? 'border border-border bg-background' : 'bg-primary text-primary-foreground')"
           @click="sync"
         >
           {{ actionLabel }}
