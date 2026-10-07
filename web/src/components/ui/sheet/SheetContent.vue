@@ -52,7 +52,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
       <slot />
 
       <DialogClose
-        class="ring-offset-background focus:ring-ring data-[state=open]:bg-secondary absolute top-4 right-4 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none"
+        class="focus-visible:ring-ring/50 absolute top-5 right-5 grid size-8 place-items-center rounded-lg transition-colors hover:bg-accent focus-visible:ring-2 focus:outline-hidden disabled:pointer-events-none"
       >
         <X class="size-4" />
         <span class="sr-only">Close</span>

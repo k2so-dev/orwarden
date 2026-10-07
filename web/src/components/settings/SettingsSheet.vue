@@ -4,16 +4,21 @@ import Segmented from "@/components/app/Segmented.vue";
 import StatusBadge from "@/components/app/StatusBadge.vue";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { client, unwrap, type Settings } from "@/lib/api";
-import { inFuture } from "@/lib/format";
-import { act, loadAll, reloadAfterWrite, settings, status } from "@/stores/data";
+import { inDays } from "@/lib/format";
+import { act, loadAll, refreshNow, reloadAfterWrite, settings, status } from "@/stores/data";
+import { notify } from "@/stores/toast";
 import { QUANT_OPTIONS } from "@/stores/filters";
 import { settingsOpen } from "@/stores/ui";
 
 const INTERVALS = [
   { value: "*/15 * * * *", label: "15 min" },
-  { value: "*/30 * * * *", label: "30 min" },
-  { value: "0 * * * *", label: "1 hour" },
-  { value: "0 */6 * * *", label: "6 hours" },
+  { value: "0 * * * *", label: "1 h" },
+  { value: "0 */6 * * *", label: "6 h" },
+  { value: "0 0 * * *", label: "24 h" },
+];
+const RANK_OPTIONS = [
+  { value: "score", label: "Weighted score" },
+  { value: "cost", label: "Cheapest effective" },
 ];
 
 const draft = reactive<{ value: Settings | null }>({ value: null });
@@ -43,6 +48,14 @@ const exceptions = computed(() => Object.entries(s.value?.filters.nativeQuantiza
 const expiry = computed(() => status.value?.key.expiresAt ?? null);
 const expiryText = computed(() => (expiry.value ? new Date(expiry.value).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Never"));
 const expirySoon = computed(() => expiry.value !== null && Date.parse(expiry.value) - Date.now() < 14 * 86_400_000);
+const workspaces = computed(() => status.value?.workspaces ?? []);
+const currentWorkspace = computed(() => s.value?.workspaceId ?? status.value?.workspace?.id ?? "");
+const rankBy = computed({
+  get: () => s.value?.presets.rankBy ?? "score",
+  set: (v: string) => {
+    if (draft.value) draft.value.presets.rankBy = v as Settings["presets"]["rankBy"];
+  },
+});
 const keyLabel = computed(() => status.value?.key.label ?? (status.value?.key.source === "env" ? "set from environment" : "not set"));
 
 function addException() {
@@ -60,13 +73,16 @@ async function save() {
   const d = draft.value;
   if (!d) return;
   saving.value = true;
+  const workspaceChanged = (d.workspaceId ?? null) !== (settings.value?.workspaceId ?? null);
   const res = await act(
     () =>
       unwrap(
         client.settings.$put({
           json: {
             refreshCron: d.refreshCron,
+            workspaceId: d.workspaceId,
             filters: d.filters,
+            scoring: d.scoring,
             optimizer: d.optimizer,
             presets: d.presets,
             alerts: { webhook: d.alerts.webhook || null, telegramBotToken: d.alerts.telegramBotToken || null, telegramChatId: d.alerts.telegramChatId || null },
@@ -74,12 +90,14 @@ async function save() {
         }),
       ),
     "Settings saved",
+    "Next refresh uses the new rules",
   );
   saving.value = false;
   if (res) {
     settings.value = res;
     settingsOpen.value = false;
-    await reloadAfterWrite();
+    if (workspaceChanged) await refreshNow(false);
+    else await reloadAfterWrite();
   }
 }
 
@@ -103,7 +121,10 @@ async function removeKey() {
 
 async function testAlert() {
   await save();
-  await act(() => unwrap(client.alerts.test.$post()), "Test alert sent");
+  const d = draft.value;
+  const target = d?.alerts.telegramChatId ? `Telegram · chat ${d.alerts.telegramChatId}` : d?.alerts.webhook ? `Webhook · ${d.alerts.webhook}` : "No channel configured";
+  const res = await act(() => unwrap(client.alerts.test.$post()));
+  if (res) notify("Test alert sent", target);
 }
 
 const input = "h-8 rounded-lg border border-border bg-background px-2.5 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-ring/50";
@@ -117,8 +138,8 @@ const btn = "h-8 rounded-lg border border-border bg-background px-3 text-[13px] 
   <Sheet v-model:open="settingsOpen">
     <SheetContent side="right" class="flex w-[520px] max-w-full flex-col gap-0 p-0 sm:max-w-[520px]">
       <SheetHeader class="border-b border-border px-6 pb-4 pt-5">
-        <SheetTitle>Settings</SheetTitle>
-        <SheetDescription>Stored on this server. OpenRouter only changes on Apply.</SheetDescription>
+        <SheetTitle class="text-base font-semibold">Settings</SheetTitle>
+        <SheetDescription class="text-[13px]">Stored on this server. OpenRouter only changes on Apply.</SheetDescription>
       </SheetHeader>
       <div v-if="s" class="flex-1 overflow-y-auto px-6 pb-6 text-[13px]">
         <div :class="section">OpenRouter</div>
@@ -127,7 +148,7 @@ const btn = "h-8 rounded-lg border border-border bg-background px-3 text-[13px] 
           <div v-if="!replacing" class="flex gap-1.5">
             <div class="flex h-8 flex-1 items-center rounded-lg border border-border px-2.5 font-mono text-[12.5px] text-muted-foreground">{{ keyLabel }}</div>
             <button type="button" :class="btn" @click="replacing = true">Replace</button>
-            <button v-if="status?.key.source === 'dashboard'" type="button" :class="[btn, 'border-transparent text-bad hover:bg-bad-bg']" @click="removeKey">Remove</button>
+            <button v-if="status?.key.source === 'dashboard'" type="button" :class="[btn, 'border-transparent bg-bad-bg text-bad hover:opacity-90']" @click="removeKey">Remove</button>
           </div>
           <div v-else class="flex gap-1.5">
             <input v-model="newKey" type="password" placeholder="sk-or-v1-…" :class="[input, 'flex-1 font-mono']" />
@@ -135,11 +156,20 @@ const btn = "h-8 rounded-lg border border-border bg-background px-3 text-[13px] 
             <button type="button" :class="[btn, 'border-transparent']" @click="replacing = false">Cancel</button>
           </div>
         </div>
+        <div v-if="workspaces.length > 0" :class="row">
+          <div>
+            <div class="font-medium">Workspace</div>
+            <div class="text-xs text-muted-foreground">Guardrail and usage come from this workspace</div>
+          </div>
+          <select :value="currentWorkspace" :class="[input, 'w-[200px]']" @change="s.workspaceId = ($event.target as HTMLSelectElement).value">
+            <option v-for="w in workspaces" :key="w.id" :value="w.id">{{ w.name }}</option>
+          </select>
+        </div>
         <div :class="row">
           <span class="font-medium">Key expiry</span>
           <span class="flex items-center gap-2">
             <span class="tnum">{{ expiryText }}</span>
-            <StatusBadge v-if="expiry" :kind="expirySoon ? 'warn' : 'mute'">{{ inFuture(expiry) }}</StatusBadge>
+            <StatusBadge v-if="expiry" :kind="expirySoon ? 'warn' : 'mute'">{{ inDays(expiry) }}</StatusBadge>
           </span>
         </div>
 
@@ -158,7 +188,7 @@ const btn = "h-8 rounded-lg border border-border bg-background px-3 text-[13px] 
         <div class="col-span-2 flex flex-col gap-2">
           <div>
             <div class="font-medium">Native quantization exceptions</div>
-            <div class="text-xs text-muted-foreground">Models trained in this precision are not penalised</div>
+            <div class="text-xs text-muted-foreground">Models trained in fp4 are not penalised</div>
           </div>
           <div class="flex flex-wrap items-center gap-1.5">
             <span v-for="[prefix, quant] in exceptions" :key="prefix" class="inline-flex h-6 items-center gap-1.5 rounded-md bg-muted px-2 font-mono text-[11.5px]">
@@ -176,14 +206,22 @@ const btn = "h-8 rounded-lg border border-border bg-background px-3 text-[13px] 
           </div>
           <div>
             <div class="font-medium">Output outlier threshold</div>
-            <div class="text-xs text-muted-foreground">output price as a multiple of the median</div>
+            <div class="text-xs text-muted-foreground">outlier at ×{{ s.filters.outliers.outVsMedian }}, hard-bad at ×{{ s.filters.outliers.hardOutVsMedian }} median</div>
           </div>
-          <input v-model.number="s.filters.outliers.outVsMedian" type="number" step="0.1" min="1" :class="num" />
+          <div class="flex gap-1.5">
+            <input v-model.number="s.filters.outliers.outVsMedian" type="number" step="0.1" min="1" :class="[num, 'w-14']" aria-label="Outlier multiple" />
+            <input v-model.number="s.filters.outliers.hardOutVsMedian" type="number" step="0.1" min="1" :class="[num, 'w-14']" aria-label="Hard-bad multiple" />
+          </div>
           <div>
             <div class="font-medium">Cache outlier threshold</div>
             <div class="text-xs text-muted-foreground">cache read price as a multiple of the median ratio</div>
           </div>
           <input v-model.number="s.filters.outliers.cacheRatioVsMedian" type="number" step="0.1" min="1" :class="num" />
+          <div>
+            <div class="font-medium">Penalty: unknown quantization</div>
+            <div class="text-xs text-muted-foreground">points off the overall score · open-weight models only</div>
+          </div>
+          <input v-model.number="s.scoring.unknownQuantPenalty" type="number" min="0" max="100" :class="num" />
         </div>
 
         <div :class="section">Bans</div>
@@ -206,6 +244,11 @@ const btn = "h-8 rounded-lg border border-border bg-background px-3 text-[13px] 
         <div :class="row">
           <span class="font-medium">Top N providers</span>
           <input v-model.number="s.presets.topN" type="number" min="1" max="20" :class="num" />
+          <div>
+            <div class="font-medium">Ranking</div>
+            <div class="text-xs text-muted-foreground">order of providers inside a preset</div>
+          </div>
+          <Segmented v-model="rankBy" :options="RANK_OPTIONS" size="sm" />
           <span class="font-medium">Naming pattern</span>
           <input v-model="s.presets.slugPattern" :class="[input, 'w-[180px] font-mono text-[12.5px]']" />
         </div>
