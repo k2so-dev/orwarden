@@ -9,16 +9,18 @@
     "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {
-    "@tanstack/vue-table": "^9.2.7",
-    "@vueuse/core": "^14.0.0",
+    "@lucide/vue": "^1.52.0",
+    "@vueuse/core": "^15.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "@fontsource-variable/geist": "^5.2.0",
+    "@fontsource-variable/geist-mono": "^5.2.0",
     "hono": "^4.13.13",
-    "lucide-vue-next": "latest",
     "reka-ui": "^2.11.0",
     "tailwind-merge": "^3.3.0",
     "vue": "3.6.0-rc.10",
-    "vue-router": "^5.4.0"
+    "vue-router": "^5.4.0",
+    "vue-sonner": "^2.0.9"
   },
   "devDependencies": {
     "@rerouter/server": "workspace:*",
