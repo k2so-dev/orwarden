@@ -643,12 +643,13 @@ export function buildPresets(ctx: Ctx, remote: ReadonlyMap<string, RemotePreset>
     });
 }
 
-export type HistoryEntry = RunRecord & { added: string[]; removed: string[] };
+export type HistoryEntry = RunRecord & { added: string[]; removed: string[]; source: "manual" | "auto" | "rollback" };
 
 export function historyEntries(runs: RunRecord[]): HistoryEntry[] {
   return runs.map((r) => ({
     ...r,
     added: r.ignoredAfter.filter((p) => !r.ignoredBefore.includes(p)),
     removed: r.ignoredBefore.filter((p) => !r.ignoredAfter.includes(p)),
+    source: r.kind === "rollback" ? "rollback" : r.kind === "apply" ? "manual" : "auto",
   }));
 }

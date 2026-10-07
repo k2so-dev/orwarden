@@ -3,7 +3,7 @@ import { classifyAll } from "../core/classify.ts";
 import { collect } from "../core/collect.ts";
 import { baselineOf, objective } from "../core/cost.ts";
 import { applyHysteresis, autoSet } from "../core/hysteresis.ts";
-import type { OpenRouterApi } from "../core/openrouter.ts";
+import { HttpError, type OpenRouterApi } from "../core/openrouter.ts";
 import { banSaving, optimize } from "../core/optimizer.ts";
 import { preflight } from "../core/preflight.ts";
 import type { Decision } from "../db.ts";
@@ -153,7 +153,7 @@ export async function refresh(rt: Runtime, scheduled = false): Promise<RefreshRe
     return { takenAt: snapshot.takenAt, models: snapshot.models.length, skipped: snapshot.skipped, decisions, applied, presets };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    rt.lastError = { at: startedAt, message };
+    rt.lastError = { at: startedAt, message, status: err instanceof HttpError ? err.status : null };
     rt.store.saveRun({
       startedAt,
       kind: scheduled ? "scheduled" : "refresh",

@@ -116,6 +116,39 @@ describe("api flow", () => {
     expect(history.body.map((r: any) => r.kind)).toEqual(["rollback", "apply", "refresh"]);
   });
 
+  test("dry-run apply returns the diff without writing", async () => {
+    await ctx.call("/api/refresh", { method: "POST", body: {} });
+    await ctx.call("/api/providers/dekallm/policy", { method: "PUT", body: { policy: "ban" } });
+    const plan = await ctx.call("/api/bans/apply", { method: "POST", body: { dryRun: true } });
+    expect(plan.body.dryRun).toBe(true);
+    expect(plan.body.added).toEqual(["dekallm"]);
+    expect(ctx.mock.calls.patches).toEqual([]);
+    const discard = await ctx.call("/api/bans/discard", { method: "POST" });
+    expect(discard.status).toBe(200);
+    expect(ctx.store.policies().get("dekallm")).toBeUndefined();
+    const sync = await ctx.call("/api/presets/sync", { method: "POST", body: { models: [DEEPSEEK], dryRun: true } });
+    expect(sync.body[0].status).toBe("planned");
+    expect(ctx.mock.calls.presets).toEqual([]);
+  });
+
+  test("status reports health and next run", async () => {
+    const before = await ctx.call("/api/status");
+    expect(before.body.health).toBe("ok");
+    expect(before.body.nextRunAt).toBe("2026-10-07T13:00:00.000Z");
+    ctx.rt.deleteKey();
+    expect((await ctx.call("/api/status")).body.health).toBe("no-key");
+  });
+
+  test("history entries carry a source and catalog carries usage", async () => {
+    await ctx.call("/api/refresh", { method: "POST", body: {} });
+    await ctx.call("/api/providers/dekallm/policy", { method: "PUT", body: { policy: "ban" } });
+    await ctx.call("/api/bans/apply", { method: "POST", body: {} });
+    const history = await ctx.call("/api/bans/history");
+    expect(history.body[0].source).toBe("manual");
+    const catalog = await ctx.call("/api/catalog?q=deepseek");
+    expect(catalog.body[0].usageUsd).toBeGreaterThan(0);
+  });
+
   test("scheduled refresh in dry-run never patches", async () => {
     await ctx.rt.exclusive(() => import("../src/services/refresh.ts").then((m) => m.refresh(ctx.rt, true)));
     await ctx.rt.exclusive(() => import("../src/services/refresh.ts").then((m) => m.refresh(ctx.rt, true)));

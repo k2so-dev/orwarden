@@ -38,7 +38,7 @@ export class Runtime {
   private cachedSnapshot: AppSnapshot | null | undefined;
   private busy: Promise<unknown> | null = null;
   private cron: { stop(): void } | null = null;
-  lastError: { at: string; message: string } | null = null;
+  lastError: { at: string; message: string; status: number | null } | null = null;
 
   constructor(opts: RuntimeOptions) {
     this.env = opts.env;

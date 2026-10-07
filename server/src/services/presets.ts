@@ -66,9 +66,9 @@ export function updatePresetSettings(rt: Runtime, model: string, patch: Partial<
   return next;
 }
 
-export type SyncResult = { model: string; slug: string; status: "synced" | "skipped" | "failed"; error?: string };
+export type SyncResult = { model: string; slug: string; status: "synced" | "planned" | "skipped" | "failed"; error?: string };
 
-export async function syncPresets(rt: Runtime, models: string[] | "auto", q: ViewQuery): Promise<SyncResult[]> {
+export async function syncPresets(rt: Runtime, models: string[] | "auto", q: ViewQuery, dryRun = false): Promise<SyncResult[]> {
   const client = await rt.client();
   const views = buildPresets(presetContext(rt, q), new Map());
   const stored = rt.store.presetSettings();
@@ -86,6 +86,10 @@ export async function syncPresets(rt: Runtime, models: string[] | "auto", q: Vie
     }
     if (models === "auto" && saved?.syncedHash === v.hash) {
       results.push({ model: v.model, slug: v.slug, status: "skipped" });
+      continue;
+    }
+    if (dryRun) {
+      results.push({ model: v.model, slug: v.slug, status: "planned" });
       continue;
     }
     try {

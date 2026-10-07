@@ -14,7 +14,8 @@ export const sameSet = (a: string[], b: string[]) => {
 };
 
 export type ApplyResult = {
-  runId: number;
+  runId: number | null;
+  dryRun: boolean;
   before: string[];
   after: string[];
   added: string[];
@@ -45,7 +46,7 @@ export function releaseAuto(states: Map<string, ProviderState>, providers: Itera
 
 export async function applyBans(
   rt: Runtime,
-  opts: { kind?: RunKind; force?: boolean; decisions?: Decision[] } = {},
+  opts: { kind?: RunKind; force?: boolean; dryRun?: boolean; decisions?: Decision[] } = {},
 ): Promise<ApplyResult> {
   const settings = rt.settings();
   const snapshot = rt.requireSnapshot();
@@ -61,7 +62,7 @@ export async function applyBans(
   if (pre.unresolved.length > 0 && !opts.force) {
     throw new AppError(422, "would-break-models", "Bans would leave models without enough providers", pre.unresolved);
   }
-  if (pre.reverted.length > 0) {
+  if (pre.reverted.length > 0 && !opts.dryRun) {
     releaseAuto(states, pre.reverted.map((r) => r.provider));
     rt.store.saveStates(states);
   }
@@ -71,6 +72,19 @@ export async function applyBans(
   const before = sorted((guardrail.ignored_providers ?? []).map((p) => p.toLowerCase()));
   const after = sorted([...fixed, ...pre.auto]);
   let patched = false;
+  if (opts.dryRun) {
+    return {
+      runId: null,
+      dryRun: true,
+      before,
+      after,
+      added: after.filter((p) => !before.includes(p)),
+      removed: before.filter((p) => !after.includes(p)),
+      patched: false,
+      reverted: pre.reverted,
+      unresolved: pre.unresolved,
+    };
+  }
   if (!sameSet(before, after)) {
     const updated = await client.patchGuardrail(guardrailId, { ignored_providers: after });
     rt.setSnapshot({ ...snapshot, guardrail: updated });
@@ -100,6 +114,7 @@ export async function applyBans(
   );
   return {
     runId,
+    dryRun: false,
     before,
     after,
     added: after.filter((p) => !before.includes(p)),
@@ -158,4 +173,15 @@ export function pendingDiff(rt: Runtime): { current: string[]; desired: string[]
     current: sorted((snap.guardrail.ignored_providers ?? []).map((p) => p.toLowerCase())),
     desired: sorted(desiredBans(rt.banInputs())),
   };
+}
+
+export function discardDrafts(rt: Runtime): { policies: number } {
+  const snap = rt.requireSnapshot();
+  const current = sorted((snap.guardrail.ignored_providers ?? []).map((p) => p.toLowerCase()));
+  const states = rt.store.loadStates();
+  releaseAuto(states, [...autoSet(states)].filter((p) => !current.includes(p)));
+  rt.store.saveStates(states);
+  const now = rt.now().toISOString();
+  rt.store.replaceBanPolicies(current.filter((p) => !autoSet(states).has(p)), now);
+  return { policies: current.length };
 }

@@ -5,7 +5,7 @@ import { LoginLimiter, clientIp, endSession, passwordMatches, requireSession, se
 import { sendAlert } from "./core/alert.ts";
 import { HttpError } from "./core/openrouter.ts";
 import { buildOverview, buildProviders } from "./services/analysis.ts";
-import { applyBans, banHistory, rollback } from "./services/bans.ts";
+import { applyBans, banHistory, discardDrafts, rollback } from "./services/bans.ts";
 import { listPresets, syncPresets, updatePresetSettings } from "./services/presets.ts";
 import { refresh } from "./services/refresh.ts";
 import { AppError, type Runtime } from "./services/state.ts";
@@ -41,6 +41,19 @@ const PresetSettingsBody = z.object({
 });
 
 const ok = { ok: true as const };
+
+type Health = "ok" | "no-key" | "invalid-key" | "unreachable" | "stale";
+
+function nextRuns(cron: string, now: Date): { next: string; intervalMs: number } | null {
+  try {
+    const next = Bun.cron.parse(cron, now);
+    const after = next && Bun.cron.parse(cron, next);
+    if (!next || !after) return null;
+    return { next: next.toISOString(), intervalMs: after.getTime() - next.getTime() };
+  } catch {
+    return null;
+  }
+}
 
 export function createApp(rt: Runtime) {
   const auth: AuthOptions = { password: rt.env.password, secret: rt.vault.sessionSecret, secure: rt.env.secureCookies };
@@ -82,9 +95,23 @@ export function createApp(rt: Runtime) {
       const snap = rt.snapshot();
       const settings = rt.settings();
       const lastRun = rt.store.recentRuns(1)[0] ?? null;
+      const keySource = await rt.keySource();
+      const schedule = nextRuns(settings.refreshCron, rt.now());
+      const age = snap ? rt.now().getTime() - Date.parse(snap.takenAt) : 0;
+      const health: Health = !keySource
+        ? "no-key"
+        : rt.lastError && (rt.lastError.status === 401 || rt.lastError.status === 403)
+          ? "invalid-key"
+          : rt.lastError
+            ? "unreachable"
+            : schedule && age > 2 * schedule.intervalMs
+              ? "stale"
+              : "ok";
       return c.json({
+        health,
+        nextRunAt: schedule?.next ?? null,
         key: {
-          source: await rt.keySource(),
+          source: keySource,
           label: snap?.key.label ?? rt.store.getValue<{ label: string | null }>("key_info")?.label ?? null,
           expiresAt: snap?.key.expiresAt ?? rt.store.getValue<{ expiresAt: string | null }>("key_info")?.expiresAt ?? null,
         },
@@ -132,14 +159,16 @@ export function createApp(rt: Runtime) {
     .get("/catalog", zValidator("query", z.object({ q: z.string().max(100).default(""), limit: z.coerce.number().int().min(1).max(200).default(50) })), (c) => {
       const { q, limit } = c.req.valid("query");
       const needle = q.toLowerCase();
-      const tracked = new Set(rt.requireSnapshot().models.map((m) => m.slug));
+      const usage = new Map(rt.requireSnapshot().models.map((m) => [m.slug, m.usageUsd]));
+      const tracked = new Set(usage.keys());
       const watch = new Set(rt.settings().watchlist.map((w) => w.slug));
       return c.json(
         rt
           .requireSnapshot()
           .catalog.filter((m) => !needle || m.id.toLowerCase().includes(needle) || m.name.toLowerCase().includes(needle))
-          .slice(0, limit)
-          .map((m) => ({ ...m, tracked: tracked.has(m.id), watched: watch.has(m.id) })),
+          .map((m) => ({ ...m, tracked: tracked.has(m.id), watched: watch.has(m.id), usageUsd: usage.get(m.id) ?? 0 }))
+          .sort((a, b) => b.usageUsd - a.usageUsd)
+          .slice(0, limit),
       );
     })
     .get("/overview", zValidator("query", ViewQuerySchema), (c) =>
@@ -180,10 +209,11 @@ export function createApp(rt: Runtime) {
         return c.json({ provider: slug, policy });
       },
     )
-    .post("/bans/apply", zValidator("json", z.object({ force: z.boolean().default(false) })), async (c) => {
-      const { force } = c.req.valid("json");
-      return c.json(await rt.exclusive(() => applyBans(rt, { force })));
+    .post("/bans/apply", zValidator("json", z.object({ force: z.boolean().default(false), dryRun: z.boolean().default(false) })), async (c) => {
+      const { force, dryRun } = c.req.valid("json");
+      return c.json(await rt.exclusive(() => applyBans(rt, { force, dryRun })));
     })
+    .post("/bans/discard", (c) => c.json(discardDrafts(rt)))
     .get("/bans/history", zValidator("query", z.object({ limit: z.coerce.number().int().min(1).max(500).default(50) })), (c) =>
       c.json(banHistory(rt, c.req.valid("query").limit)),
     )
@@ -199,9 +229,9 @@ export function createApp(rt: Runtime) {
       const { model, ...patch } = c.req.valid("json");
       return c.json(updatePresetSettings(rt, model, patch));
     })
-    .post("/presets/sync", zValidator("json", z.object({ models: z.array(z.string().min(3)).min(1).max(50), scenario: z.string().max(40).optional() })), async (c) => {
-      const { models, scenario } = c.req.valid("json");
-      return c.json(await rt.exclusive(() => syncPresets(rt, models, { scenario: scenario ?? rt.settings().presets.defaultScenario })));
+    .post("/presets/sync", zValidator("json", z.object({ models: z.array(z.string().min(3)).min(1).max(50), scenario: z.string().max(40).optional(), dryRun: z.boolean().default(false) })), async (c) => {
+      const { models, scenario, dryRun } = c.req.valid("json");
+      return c.json(await rt.exclusive(() => syncPresets(rt, models, { scenario: scenario ?? rt.settings().presets.defaultScenario }, dryRun)));
     })
     .post("/alerts/test", async (c) => {
       const alerts = rt.settings().alerts;
