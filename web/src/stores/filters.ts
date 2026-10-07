@@ -8,7 +8,7 @@ export const SCENARIOS = [
   { value: "chat-cached", label: "Chat + cache" },
   { value: "agent", label: "Agent + tools" },
   { value: "reasoning", label: "Reasoning" },
-  { value: "custom", label: "Custom…" },
+  { value: "custom", label: "Custom workload" },
 ];
 
 export const DAY_OPTIONS = [
@@ -69,6 +69,33 @@ export function resetWeights(): void {
   filters.value.wReliability = DEFAULT_WEIGHTS.reliability;
 }
 
+export const CONTEXT_TAGS = [
+  { value: 0, label: "Fresh", hint: "no cache" },
+  { value: 0.5, label: "Partly repeated", hint: "50% cached" },
+  { value: 0.8, label: "Mostly repeated", hint: "80% cached" },
+];
+
+export const ANSWER_TAGS = [
+  { value: 0.05, label: "Short", hint: "out/in 0.05" },
+  { value: 0.3, label: "Normal", hint: "out/in 0.3" },
+  { value: 1, label: "Long / reasoning", hint: "out/in 1.0" },
+];
+
+export const QUICK_WORKLOADS = [
+  { name: "chat", label: "Chat", h: 0, r: 0.3, tools: false },
+  { name: "chat-cached", label: "Chat + cache", h: 0.5, r: 0.3, tools: false },
+  { name: "agent", label: "Agent", h: 0.8, r: 0.05, tools: true },
+  { name: "reasoning", label: "Reasoning", h: 0, r: 1, tools: false },
+];
+
+export function workloadSummary(h: number, r: number, tools: boolean): string {
+  return `cache ${Math.round(h * 100)}% · out/in ${Number(r.toFixed(2))}${tools ? " · tools" : ""}`;
+}
+
 export function scenarioLabel(name: string): string {
-  return (SCENARIOS.find((s) => s.value === name)?.label ?? name).replace("…", "");
+  if (name === "custom") {
+    const f = filters.value;
+    return `Custom: ${workloadSummary(f.cache, f.ratio, f.tools)}`;
+  }
+  return SCENARIOS.find((s) => s.value === name)?.label ?? name;
 }

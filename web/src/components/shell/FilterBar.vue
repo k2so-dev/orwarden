@@ -1,20 +1,58 @@
 <script setup lang="ts" vapor>
-import { computed, ref } from "vue";
+import { computed, watch } from "vue";
 import Segmented from "@/components/app/Segmented.vue";
 import Toggle from "@/components/app/Toggle.vue";
 import RangeSlider from "@/components/app/RangeSlider.vue";
-import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { DAY_OPTIONS, DEFAULT_WEIGHTS, QUANT_OPTIONS, SCENARIOS, filters, resetWeights } from "@/stores/filters";
-import { overview } from "@/stores/data";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
+import { ANSWER_TAGS, CONTEXT_TAGS, DAY_OPTIONS, DEFAULT_WEIGHTS, QUANT_OPTIONS, QUICK_WORKLOADS, filters, resetWeights, workloadSummary } from "@/stores/filters";
+import { overview, settings } from "@/stores/data";
 
-const customOpen = ref(false);
+const MODES = [
+  { value: "actual", label: "Actual traffic" },
+  { value: "workload", label: "Describe workload" },
+];
+const workload = computed(() => filters.value.scenario !== "actual");
+const profiles = computed(() => settings.value?.scenarios.profiles ?? QUICK_WORKLOADS);
+const same = (a: number, b: number) => Math.abs(a - b) < 1e-6;
 
-const scenario = computed({
-  get: () => filters.value.scenario,
-  set: (value: string) => {
-    filters.value.scenario = value;
+function syncScenario(): void {
+  const f = filters.value;
+  const hit = profiles.value.find((p) => same(p.h, f.cache) && same(p.r, f.ratio) && p.tools === f.tools);
+  f.scenario = hit?.name ?? "custom";
+}
+
+function setMode(mode: string): void {
+  if (mode === "actual") filters.value.scenario = "actual";
+  else syncScenario();
+}
+
+function quick(q: (typeof QUICK_WORKLOADS)[number]): void {
+  const f = filters.value;
+  f.cache = q.h;
+  f.ratio = q.r;
+  f.tools = q.tools;
+}
+
+watch(
+  () => [filters.value.cache, filters.value.ratio, filters.value.tools],
+  () => {
+    if (workload.value) syncScenario();
   },
+);
+
+const summary = computed(() => workloadSummary(filters.value.cache, filters.value.ratio, filters.value.tools));
+const emphasis = computed(() => {
+  const f = filters.value;
+  const main = f.ratio >= 1 ? "output price matters most" : f.cache >= 0.5 ? "cache price matters most" : "input and output prices both matter";
+  return f.tools ? `${main} · providers without tool calls are dropped` : main;
 });
+const tag = (active: boolean) =>
+  cn(
+    "inline-flex h-[26px] items-center whitespace-nowrap rounded-full border px-2.5 text-[12.5px] font-medium transition-colors",
+    active ? "border-foreground bg-foreground text-background" : "border-border text-muted-foreground hover:text-foreground",
+  );
+
 const days = computed({
   get: () => String(filters.value.days),
   set: (value: string) => {
@@ -65,24 +103,8 @@ const previewModel = computed(() => overview.value?.models[0]?.name ?? "");
 <template>
   <div class="sticky top-14 z-20 flex flex-wrap items-center gap-x-[22px] gap-y-2.5 border-b border-border bg-background px-5 py-2.5">
     <div class="flex items-center gap-2">
-      <span :class="label">Scenario</span>
-      <Popover v-model:open="customOpen">
-        <PopoverAnchor>
-          <Segmented v-model="scenario" :options="SCENARIOS" @select="customOpen = $event === 'custom'" />
-        </PopoverAnchor>
-        <PopoverContent align="end" class="flex w-[300px] flex-col gap-3.5 rounded-[10px] p-3.5">
-          <div class="text-[13px] font-semibold">Custom scenario</div>
-          <div class="flex flex-col gap-2">
-            <div class="flex justify-between text-[12.5px]"><span>Cache hit</span><span class="tnum text-muted-foreground">{{ Math.round(filters.cache * 100) }}%</span></div>
-            <RangeSlider v-model="filters.cache" :min="0" :max="0.95" :step="0.05" />
-          </div>
-          <div class="flex flex-col gap-2">
-            <div class="flex justify-between text-[12.5px]"><span>Output / input ratio</span><span class="tnum text-muted-foreground">{{ filters.ratio.toFixed(2) }}</span></div>
-            <RangeSlider v-model="filters.ratio" :min="0" :max="2" :step="0.05" />
-          </div>
-          <div class="flex items-center justify-between text-[12.5px]"><span>Tools required</span><Toggle v-model="filters.tools" label="Tools required" /></div>
-        </PopoverContent>
-      </Popover>
+      <span :class="label">Traffic</span>
+      <Segmented :model-value="workload ? 'workload' : 'actual'" :options="MODES" @update:model-value="setMode" />
     </div>
     <div class="flex items-center gap-2">
       <span :class="label">Volume</span>
@@ -100,6 +122,43 @@ const previewModel = computed(() => overview.value?.models[0]?.name ?? "");
       </div>
       <Segmented v-model="days" :options="DAY_OPTIONS" />
       <span v-if="actual" class="text-xs text-muted-foreground">using real 7-day volume</span>
+    </div>
+    <div v-if="workload" class="flex basis-full flex-wrap items-center gap-x-5 gap-y-2">
+      <div class="flex items-center gap-1.5">
+        <span :class="[label, 'mr-0.5']">Context</span>
+        <button v-for="t in CONTEXT_TAGS" :key="t.label" type="button" :title="t.hint" :class="tag(same(filters.cache, t.value))" @click="filters.cache = t.value">{{ t.label }}</button>
+      </div>
+      <div class="flex items-center gap-1.5">
+        <span :class="[label, 'mr-0.5']">Answers</span>
+        <button v-for="t in ANSWER_TAGS" :key="t.label" type="button" :title="t.hint" :class="tag(same(filters.ratio, t.value))" @click="filters.ratio = t.value">{{ t.label }}</button>
+      </div>
+      <button type="button" :class="tag(filters.tools)" @click="filters.tools = !filters.tools">
+        <svg v-if="filters.tools" class="mr-1 size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M20 6 9 17l-5-5"></path></svg>
+        Tool calls
+      </button>
+      <div class="flex items-center gap-1 text-xs text-muted-foreground">
+        <span class="mr-0.5">Quick:</span>
+        <template v-for="(q, i) in QUICK_WORKLOADS" :key="q.name">
+          <span v-if="i > 0">·</span>
+          <button type="button" :class="['rounded px-1 hover:text-foreground', filters.scenario === q.name && 'font-semibold text-foreground']" @click="quick(q)">{{ q.label }}</button>
+        </template>
+        <span>·</span>
+        <Popover>
+          <PopoverTrigger class="rounded px-1 hover:text-foreground">Fine-tune…</PopoverTrigger>
+          <PopoverContent align="start" class="flex w-[300px] flex-col gap-3.5 rounded-[10px] p-3.5">
+            <div class="text-[13px] font-semibold">Fine-tune workload</div>
+            <div class="flex flex-col gap-2">
+              <div class="flex justify-between text-[12.5px]"><span>Input from cache</span><span class="tnum text-muted-foreground">{{ Math.round(filters.cache * 100) }}%</span></div>
+              <RangeSlider v-model="filters.cache" :min="0" :max="0.95" :step="0.05" />
+            </div>
+            <div class="flex flex-col gap-2">
+              <div class="flex justify-between text-[12.5px]"><span>Output per input token</span><span class="tnum text-muted-foreground">{{ filters.ratio.toFixed(2) }}</span></div>
+              <RangeSlider v-model="filters.ratio" :min="0" :max="2" :step="0.05" />
+            </div>
+          </PopoverContent>
+        </Popover>
+      </div>
+      <div class="text-xs text-muted-foreground"><span class="tnum font-medium text-foreground">{{ summary }}</span> · {{ emphasis }}</div>
     </div>
     <div class="flex flex-wrap items-center gap-4">
       <div class="flex items-center gap-2">

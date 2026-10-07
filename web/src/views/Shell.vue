@@ -6,7 +6,7 @@ import HeaderBar from "@/components/shell/HeaderBar.vue";
 import SettingsSheet from "@/components/settings/SettingsSheet.vue";
 import { ago, periodLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { SCENARIOS, filters } from "@/stores/filters";
+import { filters, scenarioLabel } from "@/stores/filters";
 import { go, tab, TABS } from "@/stores/nav";
 import { hasData, loading, loadError, overview, presets, providers, refreshing, refreshNow, status } from "@/stores/data";
 import { settingsOpen } from "@/stores/ui";
@@ -32,7 +32,7 @@ const pendingBans = computed(() => (providers.value?.pending.added.length ?? 0) 
 
 const context = computed(() => {
   const f = filters.value;
-  const scenario = SCENARIOS.find((s) => s.value === f.scenario)?.label.replace("…", "") ?? f.scenario;
+  const scenario = scenarioLabel(f.scenario);
   const volume = f.scenario === "actual" ? "actual volume" : `${f.volumeM}M input / day`;
   return `${scenario} · ${volume} · ${periodLabel(f.days)} · ${f.minQuant}+ · uptime ≥ ${f.minUptime}%${f.zdrOnly ? " · ZDR only" : ""}`;
 });

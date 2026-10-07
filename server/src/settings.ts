@@ -96,7 +96,7 @@ export const DEFAULT_SETTINGS: Settings = {
     inputTokensPerDay: 1_000_000,
     profiles: [
       { name: "chat", tools: false, h: 0, r: 0.3 },
-      { name: "chat-cached", tools: false, h: 0.5, r: 0.2 },
+      { name: "chat-cached", tools: false, h: 0.5, r: 0.3 },
       { name: "agent", tools: true, h: 0.8, r: 0.05 },
       { name: "reasoning", tools: false, h: 0, r: 1 },
     ],
