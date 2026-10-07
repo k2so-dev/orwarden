@@ -43,8 +43,7 @@ export function classifyModel(model: ModelInput, config: Config): ClassifiedMode
   const quantOk = model.endpoints.filter((e) => quantRank(e.quantization) >= minRank);
   const pool = quantOk.length > 0 ? quantOk : model.endpoints;
   const medOut = median(pool.map((e) => e.pOut));
-  const ratio = (e: { pIn: number; pCache: number }) => (e.pIn > 0 ? e.pCache / e.pIn : 0);
-  const medRatio = median(pool.filter((e) => e.pIn > 0).map(ratio));
+  const medCache = median(pool.filter((e) => e.cacheKnown).map((e) => e.pCache));
   const rScore = Math.max(model.r, config.optimizer.minOutRatio);
 
   const endpoints = model.endpoints.map((e) => {
@@ -63,9 +62,9 @@ export function classifyModel(model: ModelInput, config: Config): ClassifiedMode
       output = true;
       soft.push(`output ${times(e.pOut / medOut)} median`);
     }
-    if (model.h > outliers.minHForCacheRule && medRatio > 0 && ratio(e) > outliers.cacheRatioVsMedian * medRatio) {
+    if (model.h > outliers.minHForCacheRule && medCache > 0 && e.pCache > outliers.cacheRatioVsMedian * medCache) {
       cache = true;
-      soft.push(`cache ${times(ratio(e) / medRatio)} median${e.cacheKnown ? "" : " (no cache price)"}`);
+      soft.push(`cache ${times(e.pCache / medCache)} median${e.cacheKnown ? "" : " (no cache price)"}`);
     }
     const cls: EndpointClass = hard.length ? "hard-bad" : soft.length ? "outlier" : "ok";
     const cEff = effectiveCost(e, model.h, rScore, config);

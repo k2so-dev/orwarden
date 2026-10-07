@@ -85,7 +85,7 @@ const omTone = computed(() => {
   const v = props.row.outVsMedian ?? 0;
   return v >= outThresholds.value.hardOutVsMedian ? "text-bad" : v >= outThresholds.value.outVsMedian ? "text-warn" : "";
 });
-const discTone = computed(() => (props.row.cacheDiscount === null || props.row.cacheDiscount < 0.7 ? "text-warn" : ""));
+const discTone = computed(() => (props.row.cacheDiscount === null ? "text-warn" : ""));
 const vsTone = computed(() => {
   const v = props.row.vsBest;
   if (v === null) return "text-muted-foreground";

@@ -214,7 +214,7 @@ const btn = "h-8 rounded-lg border border-border bg-background px-3 text-[13px] 
           </div>
           <div>
             <div class="font-medium">Cache outlier threshold</div>
-            <div class="text-xs text-muted-foreground">cache read price as a multiple of the median ratio</div>
+            <div class="text-xs text-muted-foreground">cache read price as a multiple of the median cache price</div>
           </div>
           <input v-model.number="s.filters.outliers.cacheRatioVsMedian" type="number" step="0.1" min="1" :class="num" />
           <div>

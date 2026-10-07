@@ -158,3 +158,13 @@ describe("low quantization", () => {
     ]);
   });
 });
+
+describe("cache rule", () => {
+  test("judges the absolute cache price, not the discount", () => {
+    const config = testConfig();
+    const m = deepseekModel(config);
+    const morph = m.endpoints.find((e) => e.tag === "morph/fp8")!;
+    expect(morph.reasons.some((r) => r.startsWith("cache"))).toBe(false);
+    expect(m.endpoints.find((e) => e.tag === "inference-net/fp8")!.reasons.some((r) => r.startsWith("cache"))).toBe(true);
+  });
+});
