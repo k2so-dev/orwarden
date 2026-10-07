@@ -250,9 +250,9 @@ export function createApp(rt: Runtime) {
       const { model, ...patch } = c.req.valid("json");
       return c.json(updatePresetSettings(rt, model, patch));
     })
-    .post("/presets/sync", zValidator("json", z.object({ models: z.array(z.string().min(3)).min(1).max(50), scenario: z.string().max(40).optional(), dryRun: z.boolean().default(false) })), async (c) => {
-      const { models, scenario, dryRun } = c.req.valid("json");
-      return c.json(await rt.exclusive(() => syncPresets(rt, models, { scenario: scenario ?? rt.settings().presets.defaultScenario }, dryRun)));
+    .post("/presets/sync", zValidator("json", z.object({ models: z.array(z.string().min(3)).min(1).max(50), scenario: z.string().max(40).optional(), view: ViewQuerySchema.optional(), dryRun: z.boolean().default(false) })), async (c) => {
+      const { models, scenario, view, dryRun } = c.req.valid("json");
+      return c.json(await rt.exclusive(() => syncPresets(rt, models, view ?? { scenario: scenario ?? rt.settings().presets.defaultScenario }, dryRun)));
     })
     .post("/alerts/test", async (c) => {
       const alerts = rt.settings().alerts;
