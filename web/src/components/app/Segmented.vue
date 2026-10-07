@@ -3,6 +3,11 @@ import { cn } from "@/lib/utils";
 
 withDefaults(defineProps<{ options: { value: string; label: string }[]; size?: "sm" | "md"; class?: string }>(), { size: "md", class: "" });
 const model = defineModel<string>({ required: true });
+const emit = defineEmits<{ select: [value: string] }>();
+const pick = (value: string) => {
+  model.value = value;
+  emit("select", value);
+};
 </script>
 
 <template>
@@ -15,10 +20,10 @@ const model = defineModel<string>({ required: true });
         cn(
           'whitespace-nowrap rounded-md px-[10px] font-medium transition-colors',
           size === 'sm' ? 'h-6 text-xs' : 'h-[26px] text-[12.5px]',
-          model === o.value ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+          model === o.value ? 'bg-background text-foreground shadow-[0_1px_3px_rgb(0_0_0/.12)]' : 'text-muted-foreground hover:text-foreground',
         )
       "
-      @click="model = o.value"
+      @click="pick(o.value)"
     >
       {{ o.label }}
     </button>

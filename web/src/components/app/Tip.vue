@@ -1,17 +1,14 @@
 <script setup lang="ts" vapor>
+import type { TipLine } from "@/lib/issues";
 import { cn } from "@/lib/utils";
+import { hideTip, showTip } from "@/stores/tip";
 
-defineProps<{ title?: string; lines: string[]; class?: string }>();
+const props = defineProps<{ title: string; lines: TipLine[]; class?: string }>();
+const show = (e: Event) => showTip(e, props.title, props.lines);
 </script>
 
 <template>
-  <span :class="cn('group/tip relative inline-flex', $props.class)">
+  <span :class="cn('inline-flex cursor-help', props.class)" tabindex="0" @mouseenter="show" @focus="show" @mouseleave="hideTip" @blur="hideTip">
     <slot />
-    <span
-      class="pointer-events-none invisible absolute left-0 top-full z-40 mt-1.5 w-max max-w-[320px] whitespace-normal rounded-lg border border-border bg-popover p-2.5 text-left text-xs font-normal text-popover-foreground opacity-0 shadow-lg transition-opacity group-hover/tip:visible group-hover/tip:opacity-100"
-    >
-      <span v-if="title" class="mb-1 block font-semibold">{{ title }}</span>
-      <span v-for="(line, i) in lines" :key="i" class="block text-muted-foreground">{{ line }}</span>
-    </span>
   </span>
 </template>

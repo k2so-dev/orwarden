@@ -3,23 +3,27 @@ import { computed } from "vue";
 import DeltaChip from "@/components/app/DeltaChip.vue";
 import type { ModelView } from "@/lib/api";
 import { money } from "@/lib/format";
+import { SCENARIOS } from "@/stores/filters";
 import { overview } from "@/stores/data";
 
 const props = defineProps<{ model: ModelView }>();
 
-const LABELS: Record<string, string> = { actual: "Actual traffic", chat: "Chat", "chat-cached": "Chat + cache", agent: "Agent + tools", reasoning: "Reasoning" };
+const label = (name: string) => SCENARIOS.find((s) => s.value === name)?.label ?? name;
+const delta = (v: number | null, base: number | null) => (base && v !== null ? v / base - 1 : null);
 
 const rows = computed(() =>
-  props.model.scenarios.map((s) => ({
-    key: s.name,
-    label: LABELS[s.name] ?? s.name,
-    current: s.name === (overview.value?.scenario.name ?? "actual"),
-    default: s.default,
-    bans: s.bans,
-    preset: s.preset,
-    banDelta: s.default && s.bans !== null ? s.bans / s.default - 1 : null,
-    presetDelta: s.default && s.preset !== null ? s.preset / s.default - 1 : null,
-  })),
+  props.model.scenarios
+    .filter((s) => s.name !== "actual")
+    .map((s) => ({
+      key: s.name,
+      label: label(s.name),
+      current: s.name === overview.value?.scenario.name,
+      default: s.default,
+      bans: s.bans,
+      preset: s.preset,
+      banDelta: delta(s.bans, s.default),
+      presetDelta: delta(s.preset, s.default),
+    })),
 );
 </script>
 
@@ -38,8 +42,11 @@ const rows = computed(() =>
     >
       <span class="px-3">{{ r.label }}</span>
       <span class="px-3 text-right">{{ money(r.default) }}</span>
-      <span class="flex items-center justify-end gap-2 px-3">{{ money(r.bans) }}<DeltaChip :value="r.banDelta" class="min-w-11 justify-center" /></span>
-      <span class="flex items-center justify-end gap-2 px-3">{{ money(r.preset) }}<DeltaChip :value="r.presetDelta" class="min-w-11 justify-center" /></span>
+      <span class="flex items-center justify-end gap-2 px-3">{{ money(r.bans) }}<DeltaChip :value="r.banDelta" class="min-w-11" /></span>
+      <span class="flex items-center justify-end gap-2 px-3">
+        <span :class="r.preset === null && 'font-normal text-muted-foreground'">{{ r.preset === null ? "no preset" : money(r.preset) }}</span>
+        <DeltaChip :value="r.presetDelta" class="min-w-11" />
+      </span>
     </div>
   </div>
 </template>

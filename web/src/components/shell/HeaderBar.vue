@@ -1,10 +1,11 @@
 <script setup lang="ts" vapor>
 import { computed } from "vue";
 import { client, unwrap } from "@/lib/api";
-import { ago, inFuture } from "@/lib/format";
+import { ago, dateTime, inDays, inFuture } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import Segmented from "@/components/app/Segmented.vue";
 import StatusBadge from "@/components/app/StatusBadge.vue";
+import Tip from "@/components/app/Tip.vue";
 import { act, dryRun, loadSettings, logout, refreshNow, refreshing, status } from "@/stores/data";
 import { settingsOpen, theme, toggleTheme } from "@/stores/ui";
 
@@ -28,21 +29,29 @@ const keyPill = computed(() => {
   if (!s) return { dot: "bg-muted-foreground", label: "…", sub: "" };
   switch (s.health) {
     case "no-key":
-      return { dot: "bg-muted-foreground", label: "Missing", sub: "" };
+      return { dot: "bg-muted-foreground", label: "No key", sub: "" };
     case "invalid-key":
-      return { dot: "bg-bad", label: "Invalid key", sub: "401" };
-    case "unreachable":
-      return { dot: "bg-warn", label: "Unreachable", sub: "" };
+      return { dot: "bg-bad", label: "Invalid key", sub: "401 from OpenRouter" };
     default: {
       const exp = s.key.expiresAt;
-      return { dot: "bg-ok", label: "Connected", sub: exp ? `expires in ${inFuture(exp)}` : "" };
+      return { dot: "bg-ok", label: "Connected", sub: exp ? `expires ${inDays(exp)}` : "no expiry" };
     }
   }
 });
 
-const dataLabel = computed(() => (status.value?.takenAt ? `Data ${ago(status.value.takenAt)}` : "No data yet"));
-const stale = computed(() => status.value?.health === "stale");
-const next = computed(() => (status.value?.nextRunAt ? `next in ${inFuture(status.value.nextRunAt)}` : ""));
+const keyTip = computed(() => {
+  const s = status.value;
+  if (!s || s.health === "no-key") return "No key stored yet.";
+  if (s.health === "invalid-key") return "OpenRouter rejected the key (401). Replace it in Settings.";
+  const parts = [s.key.label ?? (s.key.source === "env" ? "Key from environment" : "Stored key"), s.workspace?.name ?? "", s.key.expiresAt ? `expires ${dateTime(s.key.expiresAt, ", ")}` : "no expiry"];
+  return parts.filter(Boolean).join(" · ");
+});
+const dataLabel = computed(() => (refreshing.value ? "Refreshing…" : status.value?.takenAt ? `Data ${ago(status.value.takenAt)}` : "No data yet"));
+const stale = computed(() => ["stale", "unreachable", "invalid-key"].includes(status.value?.health ?? "") && Boolean(status.value?.takenAt));
+const next = computed(() =>
+  status.value?.nextRunAt && (status.value.health === "ok" || status.value.health === "stale") ? `next in ${inFuture(status.value.nextRunAt)}` : "",
+);
+const noKey = computed(() => status.value?.health === "no-key");
 const workspace = computed(() => status.value?.workspace?.name ?? "—");
 const pill = "inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-full border border-border px-2.5 text-xs text-muted-foreground";
 const iconButton = "grid size-8 place-items-center rounded-lg text-foreground hover:bg-accent";
@@ -57,11 +66,11 @@ const iconButton = "grid size-8 place-items-center rounded-lg text-foreground ho
       <span class="text-[13px] text-muted-foreground">{{ workspace }}</span>
     </div>
     <div class="flex min-w-0 flex-1 flex-wrap items-center justify-center gap-2">
-      <span :class="pill">
+      <Tip title="OpenRouter management key" :lines="[{ text: keyTip, tone: 'fg' }]" :class="pill">
         <span :class="cn('size-[7px] rounded-full', keyPill.dot)"></span>
         <span class="font-medium text-foreground">{{ keyPill.label }}</span>
         <span v-if="keyPill.sub">· {{ keyPill.sub }}</span>
-      </span>
+      </Tip>
       <span :class="pill">
         {{ dataLabel }}
         <StatusBadge v-if="stale" kind="warn" class="h-[18px] rounded-[5px] px-1.5">stale</StatusBadge>
@@ -72,7 +81,7 @@ const iconButton = "grid size-8 place-items-center rounded-lg text-foreground ho
     <div class="flex flex-none items-center gap-1">
       <button
         type="button"
-        class="mr-1 inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-background px-3 text-[13px] font-medium hover:bg-accent disabled:opacity-60"
+        class="mr-1 inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-background px-3 text-[13px] font-medium hover:bg-accent"
         :disabled="refreshing"
         @click="refreshNow(false)"
       >
@@ -109,7 +118,7 @@ const iconButton = "grid size-8 place-items-center rounded-lg text-foreground ho
     </div>
   </header>
   <div
-    v-if="dryRun"
+    v-if="dryRun && !noKey"
     class="flex h-8 items-center justify-center gap-2.5 border-b border-border bg-warn-bg text-[12.5px] font-medium text-warn"
   >
     <span>Dry-run: nothing is written to OpenRouter. Write buttons show a preview.</span>

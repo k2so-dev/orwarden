@@ -24,7 +24,9 @@ export function toggleIn(source: typeof openModels, key: string): void {
   source.value = next;
 }
 
+const ASC_FIRST = new Set(["rank", "in", "out", "cache", "om", "lat", "perM", "hz", "vs"]);
+
 export function sortBy(key: string): void {
   const s = sortState.value;
-  sortState.value = s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: key === "rank" ? "asc" : "desc" };
+  sortState.value = s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: ASC_FIRST.has(key) ? "asc" : "desc" };
 }

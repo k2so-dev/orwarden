@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 import Segmented from "@/components/app/Segmented.vue";
 import Toggle from "@/components/app/Toggle.vue";
 import RangeSlider from "@/components/app/RangeSlider.vue";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { DAY_OPTIONS, DEFAULT_WEIGHTS, QUANT_OPTIONS, SCENARIOS, filters, resetWeights } from "@/stores/filters";
 import { overview } from "@/stores/data";
 
@@ -13,7 +13,6 @@ const scenario = computed({
   get: () => filters.value.scenario,
   set: (value: string) => {
     filters.value.scenario = value;
-    customOpen.value = value === "custom";
   },
 });
 const days = computed({
@@ -53,7 +52,11 @@ const preview = computed(() => {
     .map((e) => {
       const was = base.get(e.tag);
       const delta = was === undefined ? 0 : was - e.rank;
-      return { ...e, text: was === undefined ? "new" : delta > 0 ? `▲${delta}` : delta < 0 ? `▼${-delta}` : "", tone: delta > 0 ? "text-ok" : delta < 0 ? "text-bad" : "text-muted-foreground" };
+      return {
+        ...e,
+        text: was === undefined ? "new" : delta > 0 ? `▲${delta}` : delta < 0 ? `▼${-delta}` : "–",
+        tone: was === undefined || delta > 0 ? "text-ok" : delta < 0 ? "text-bad" : "text-muted-foreground",
+      };
     });
 });
 const previewModel = computed(() => overview.value?.models[0]?.name ?? "");
@@ -63,9 +66,10 @@ const previewModel = computed(() => overview.value?.models[0]?.name ?? "");
   <div class="sticky top-14 z-20 flex flex-wrap items-center gap-x-[22px] gap-y-2.5 border-b border-border bg-background px-5 py-2.5">
     <div class="flex items-center gap-2">
       <span :class="label">Scenario</span>
-      <Segmented v-model="scenario" :options="SCENARIOS" />
       <Popover v-model:open="customOpen">
-        <PopoverTrigger as-child><span class="size-0"></span></PopoverTrigger>
+        <PopoverAnchor>
+          <Segmented v-model="scenario" :options="SCENARIOS" @select="customOpen = $event === 'custom'" />
+        </PopoverAnchor>
         <PopoverContent align="end" class="flex w-[300px] flex-col gap-3.5 rounded-[10px] p-3.5">
           <div class="text-[13px] font-semibold">Custom scenario</div>
           <div class="flex flex-col gap-2">
@@ -146,7 +150,7 @@ const previewModel = computed(() => overview.value?.models[0]?.name ?? "");
             <RangeSlider v-model="filters.wReliability" :min="0" :max="100" :step="5" />
             <span class="tnum text-right">{{ filters.wReliability }}</span>
           </div>
-          <div v-if="preview.length" class="flex flex-col gap-1 border-t border-border pt-2.5">
+          <div class="flex flex-col gap-1 border-t border-border pt-2.5">
             <div class="mb-0.5 text-xs text-muted-foreground">Live preview · {{ previewModel }} top 5 (vs default weights)</div>
             <div v-for="p in preview" :key="p.tag" class="tnum grid grid-cols-[18px_1fr_32px_32px] gap-2 text-[12.5px]">
               <span class="text-muted-foreground">{{ p.rank }}</span>

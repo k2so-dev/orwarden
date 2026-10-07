@@ -1,4 +1,3 @@
-import { toast } from "vue-sonner";
 import { computed, ref, shallowRef, watch } from "vue";
 import { refDebounced } from "@vueuse/core";
 import {
@@ -14,6 +13,7 @@ import {
   type Status,
 } from "@/lib/api";
 import { viewQuery } from "./filters";
+import { notify } from "./toast";
 
 export const authenticated = ref<boolean | null>(null);
 export const status = shallowRef<Status | null>(null);
@@ -105,15 +105,17 @@ export async function reloadAfterWrite(): Promise<void> {
 
 export async function refreshNow(full = false): Promise<void> {
   refreshing.value = true;
+  let ok = false;
   try {
     await unwrap(client.refresh.$post({ json: { full } }));
-    toast.success(full ? "Full cycle finished" : "Data refreshed");
+    ok = true;
   } catch (err) {
-    toast.error(message(err));
+    notify("Refresh failed", message(err), "err");
   } finally {
-    refreshing.value = false;
     await reloadAfterWrite();
+    refreshing.value = false;
   }
+  if (ok) notify(full ? "Full cycle finished" : "Data refreshed", dataSummary());
 }
 
 const debounced = refDebounced(viewQuery, 250);
@@ -121,15 +123,25 @@ watch(debounced, () => {
   if (authenticated.value) void loadViews();
 });
 
-export async function act<T>(task: () => Promise<T>, success?: string): Promise<T | null> {
+export function dataSummary(): string {
+  const models = overview.value?.models ?? [];
+  const endpoints = models.reduce((n, m) => n + m.endpoints.length, 0);
+  return `${providers.value?.rows.length ?? 0} providers · ${models.length} models · ${endpoints} endpoints`;
+}
+
+export async function act<T>(task: () => Promise<T>, success?: string, desc?: string | ((result: T) => string)): Promise<T | null> {
   try {
     const result = await task();
-    if (success) toast.success(success);
+    if (success) notify(success, typeof desc === "function" ? desc(result) : (desc ?? ""));
     return result;
   } catch (err) {
-    toast.error(message(err));
+    notify("Write failed", message(err), "err");
     return null;
   }
+}
+
+export function previewOnly(): void {
+  notify("Preview only", "Dry-run: nothing was written to OpenRouter.", "info");
 }
 
 export const historyCache = shallowRef<ReadonlyMap<string, HistoryPoint[]>>(new Map());

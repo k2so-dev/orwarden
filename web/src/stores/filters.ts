@@ -27,9 +27,9 @@ export const DEFAULT_WEIGHTS = { price: 60, speed: 20, reliability: 20 };
 
 export const filters = useStorage("rr-filters", {
   scenario: "actual",
-  cache: 0.5,
-  ratio: 0.2,
-  tools: false,
+  cache: 0.6,
+  ratio: 0.3,
+  tools: true,
   volumeM: 1,
   days: 7,
   minQuant: "fp8",
@@ -67,4 +67,8 @@ export function resetWeights(): void {
   filters.value.wPrice = DEFAULT_WEIGHTS.price;
   filters.value.wSpeed = DEFAULT_WEIGHTS.speed;
   filters.value.wReliability = DEFAULT_WEIGHTS.reliability;
+}
+
+export function scenarioLabel(name: string): string {
+  return (SCENARIOS.find((s) => s.value === name)?.label ?? name).replace("…", "");
 }

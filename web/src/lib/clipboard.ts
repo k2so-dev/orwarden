@@ -1,10 +1,10 @@
-import { toast } from "vue-sonner";
+import { notify } from "@/stores/toast";
 
 export async function copy(text: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(text);
-    toast.success("Copied");
+    notify("Copied to clipboard", text);
   } catch {
-    toast.error("Copy failed");
+    notify("Copy failed", "The browser blocked clipboard access.", "err");
   }
 }

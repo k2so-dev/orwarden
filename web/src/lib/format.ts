@@ -10,7 +10,7 @@ export function money(value: number | null | undefined): string {
 
 export function signedMoney(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";
-  if (Math.abs(value) < 0.005) return "±$0";
+  if (Math.abs(value) < 0.00005) return "±$0";
   return `${value > 0 ? "+" : "−"}${money(Math.abs(value))}`;
 }
 
@@ -61,4 +61,33 @@ export function inFuture(iso: string | null | undefined, now = Date.now()): stri
   const hours = Math.round(minutes / 60);
   if (hours < 48) return `${hours} h`;
   return `${Math.round(hours / 24)} d`;
+}
+
+export function periodLabel(days: number): string {
+  return days === 1 ? "1 day" : `${days} days`;
+}
+
+export function volume(perDay: number): string {
+  const m = perDay / 1_000_000;
+  return `${Number(m.toFixed(m >= 10 ? 0 : 1))}M`;
+}
+
+export function seconds(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined) return "—";
+  return `${(ms / 1000).toFixed(1)} s`;
+}
+
+const stamp = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+
+export function dateTime(iso: string | null | undefined, sep = " · "): string {
+  if (!iso) return "—";
+  const parts = Object.fromEntries(stamp.formatToParts(new Date(iso)).map((p) => [p.type, p.value]));
+  return `${parts.month} ${parts.day}${sep}${parts.hour}:${parts.minute}`;
+}
+
+export function inDays(iso: string | null | undefined, now = Date.now()): string {
+  if (!iso) return "—";
+  const days = Math.round((Date.parse(iso) - now) / 86_400_000);
+  if (days <= 0) return "today";
+  return days === 1 ? "in 1 day" : `in ${days} days`;
 }

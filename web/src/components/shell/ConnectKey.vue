@@ -1,8 +1,10 @@
 <script setup lang="ts" vapor>
 import { ref } from "vue";
-import { client, unwrap } from "@/lib/api";
+import { client, RequestError, unwrap } from "@/lib/api";
+import { inDays } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { loadAll, message, refreshNow } from "@/stores/data";
+import { loadAll, message, refreshNow, status } from "@/stores/data";
+import { notify } from "@/stores/toast";
 
 const key = ref("");
 const show = ref(false);
@@ -10,16 +12,23 @@ const error = ref<string | null>(null);
 const busy = ref(false);
 
 async function connect(): Promise<void> {
-  if (busy.value || key.value.trim().length === 0) return;
+  if (busy.value) return;
+  if (key.value.trim().length === 0) {
+    error.value = "Enter a management key.";
+    return;
+  }
   busy.value = true;
   error.value = null;
   try {
     await unwrap(client.key.$put({ json: { key: key.value.trim() } }));
     key.value = "";
     await loadAll();
+    const s = status.value;
+    notify("Connected to OpenRouter", [s?.workspace?.name, s?.key.expiresAt ? `key expires ${inDays(s.key.expiresAt)}` : "key never expires"].filter(Boolean).join(" · "));
     await refreshNow(false);
   } catch (err) {
-    error.value = message(err);
+    const rejected = err instanceof RequestError && (err.body.error === "invalid-key" || err.body.error === "not-management-key");
+    error.value = rejected ? "OpenRouter returned 401. Use a management key (sk-or-v1-…), not an inference API key." : message(err);
   } finally {
     busy.value = false;
   }
@@ -62,7 +71,7 @@ async function connect(): Promise<void> {
           </button>
         </div>
         <div v-if="error" class="text-[12.5px] text-bad">{{ error }}</div>
-        <a href="https://openrouter.ai/settings/management-keys" target="_blank" rel="noreferrer" class="text-[12.5px] text-muted-foreground hover:text-foreground">
+        <a href="https://openrouter.ai/settings/management-keys" target="_blank" rel="noreferrer" class="text-[12.5px] text-muted-foreground underline underline-offset-[3px] hover:text-foreground">
           Where do I create a management key? ↗
         </a>
       </div>

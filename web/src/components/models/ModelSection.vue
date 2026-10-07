@@ -1,7 +1,7 @@
 <script setup lang="ts" vapor>
 import { computed } from "vue";
 import type { ModelView } from "@/lib/api";
-import { money, pct } from "@/lib/format";
+import { money, pct, periodLabel, volume as vol } from "@/lib/format";
 import { copy } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -11,20 +11,18 @@ import { overview } from "@/stores/data";
 import EndpointTable from "./EndpointTable.vue";
 import ScenarioTable from "./ScenarioTable.vue";
 
-const props = defineProps<{ model: ModelView }>();
+const props = defineProps<{ model: ModelView; index: number }>();
 
 const toggle = () => toggleIn(openModels, props.model.slug);
-const open = computed(() => !openModels.value.has(props.model.slug));
+const open = computed(() => (props.index < 2) !== openModels.value.has(props.model.slug));
 const days = computed(() => overview.value?.horizonDays ?? 7);
-const horizonLabel = computed(() => `${days.value}d`);
-const volume = computed(() =>
-  overview.value?.scenario.name === "actual" ? "real volume" : `${(props.model.profile.inputPerDay / 1_000_000).toFixed(1)}M input / day`,
-);
+const horizonLabel = computed(() => periodLabel(days.value));
+const volume = computed(() => (overview.value?.scenario.name === "actual" ? "actual volume" : `${vol(props.model.profile.inputPerDay)} input / day`));
 
 const COLUMN_ITEMS = [
-  { key: "zt", label: "ZDR / Tools" },
+  { key: "zt", label: "ZDR & Tools" },
   { key: "lat", label: "Latency" },
-  { key: "share", label: "Share" },
+  { key: "share", label: "Traffic share" },
   { key: "brk", label: "Score breakdown" },
 ] as const;
 
@@ -80,14 +78,14 @@ const densityModel = computed({
     <div v-if="open" class="border-t border-border">
       <div
         v-for="w in model.warnings"
-        :key="w"
-        class="mx-4 mt-3 flex items-center gap-2 rounded-lg bg-warn-bg px-3 py-[9px] text-[13px] text-warn"
+        :key="w.title"
+        :class="['mx-4 mt-3 flex items-center gap-2 rounded-lg px-3 py-[9px] text-[13px]', w.level === 'bad' ? 'bg-bad-bg text-bad' : 'bg-warn-bg text-warn']"
       >
         <svg class="size-[15px] flex-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
           <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"></path>
           <path d="M12 9v4M12 17h.01"></path>
         </svg>
-        <span class="text-foreground">{{ w }}</span>
+        <span><b class="font-semibold">{{ w.title }}</b> <span class="text-foreground">{{ w.text }}</span></span>
       </div>
       <div class="flex items-center justify-between px-4 py-2.5">
         <span class="text-[13px] font-semibold">
@@ -112,11 +110,13 @@ const densityModel = computed({
               class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] hover:bg-accent"
               @click="columns[c.key] = !columns[c.key]"
             >
-              <span class="grid w-4 place-items-center"><span v-if="columns[c.key]">✓</span></span>
+              <span class="grid w-4 place-items-center">
+                <svg v-if="columns[c.key]" class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg>
+              </span>
               {{ c.label }}
             </button>
             <div class="mt-1.5 border-t border-border px-2 pb-1 pt-2 text-[11.5px] font-medium text-muted-foreground">Density</div>
-            <Segmented v-model="densityModel" :options="DENSITY" size="sm" class="mx-1.5 mb-1" />
+            <Segmented v-model="densityModel" :options="DENSITY" size="sm" class="mx-1.5 mb-1 [&>button]:flex-1" />
           </PopoverContent>
         </Popover>
       </div>

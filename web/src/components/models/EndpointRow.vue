@@ -3,9 +3,12 @@ import { computed } from "vue";
 import Sparkline from "@/components/app/Sparkline.vue";
 import StatusBadge, { type BadgeKind } from "@/components/app/StatusBadge.vue";
 import type { EndpointView, HistoryPoint, ModelView } from "@/lib/api";
-import { price, signedPct, uptime } from "@/lib/format";
+import { money, pct, periodLabel, price, seconds, uptime, volume } from "@/lib/format";
+import { TONE_CLASS, verdictBadge, type TipLine } from "@/lib/issues";
 import { cn } from "@/lib/utils";
-import { overview } from "@/stores/data";
+import { SCENARIOS, filters } from "@/stores/filters";
+import { overview, settings } from "@/stores/data";
+import { hideTip, showTip } from "@/stores/tip";
 
 const props = defineProps<{
   row: EndpointView;
@@ -20,43 +23,108 @@ const props = defineProps<{
 defineEmits<{ toggle: [] }>();
 
 const dim = computed(() => !props.row.eligible);
-const quantKind = computed<BadgeKind>(() => (props.row.quant === "low" ? "bad" : props.row.quant === "unknown" ? "mute" : "out"));
-const verdictKind = computed<BadgeKind>(() => (props.row.verdict === "ok" ? "ok" : props.row.verdict === "outlier" ? "warn" : "bad"));
-const verdictText = computed(() => (props.row.verdict === "ok" ? "ok" : `${props.row.verdict}: ${props.row.reasons[0] ?? ""}`));
-const verdictTitle = computed(() => (props.row.reasons.length ? props.row.reasons.join("\n") : "Within all rules"));
+const rankText = computed(() => props.row.presetRank ?? props.position);
+const quantKind = computed<BadgeKind>(() => (props.row.quant === "low" ? "bad" : props.row.quant === "unknown" ? "mute" : props.row.quant === "closed" ? "none" : "out"));
+const verdict = computed(() => verdictBadge(props.row));
+
+const filterLines = computed(() => {
+  const r = props.row;
+  const out: string[] = [];
+  if (props.model.profile.tools && !r.tools) out.push("tools not supported");
+  if (filters.value.zdrOnly && !r.zdr) out.push("no ZDR");
+  if (r.ban.inDesired) out.push("provider is banned");
+  return out;
+});
+
+const reasons = computed<TipLine[]>(() => [
+  ...props.row.issues.map((i) => ({ text: i.text, tone: i.level === "bad" ? ("bad" as const) : ("warn" as const) })),
+  ...filterLines.value.map((f) => ({ text: `Filter: ${f}`, tone: "muted" as const })),
+]);
 
 const ban = computed(() => {
   const b = props.row.ban;
-  if (b.auto) return { kind: "bad" as BadgeKind, text: "banned (auto)", title: "Banned automatically after repeated bad runs" };
-  if (b.policy === "ban") return { kind: "bad" as BadgeKind, text: "banned (manual)", title: "Set by you" };
-  if (b.inGuardrail) return { kind: "bad" as BadgeKind, text: "banned", title: "Present in the guardrail ignore list" };
-  if (b.pending) return { kind: "warn" as BadgeKind, text: `pending ${b.pending.streak} of ${b.pending.needed} runs`, title: `Will ${b.pending.action} when the streak completes` };
-  if (b.inDesired) return { kind: "warn" as BadgeKind, text: "+ ban pending", title: "In draft, not applied" };
-  return { kind: "none" as BadgeKind, text: "—", title: "Not banned" };
+  const runs = settings.value?.optimizer.hysteresis.banAfterRuns ?? 2;
+  if (b.inGuardrail && b.inDesired) {
+    return b.auto
+      ? { kind: "bad" as BadgeKind, text: "banned (auto)", tip: `Auto-banned: bad on ${runs} of ${runs} consecutive runs. Applies to every model and every app.` }
+      : { kind: "bad" as BadgeKind, text: "banned (manual)", tip: "Banned manually. Applies to every model and every app." };
+  }
+  if (b.inGuardrail) return { kind: "warn" as BadgeKind, text: "unban pending", tip: "Unban is in the draft — press Apply on the Providers tab." };
+  if (b.inDesired) return { kind: "warn" as BadgeKind, text: "ban pending", tip: "Ban is in the draft — not written yet. Press Apply on the Providers tab." };
+  if (b.pending?.action === "ban") {
+    return { kind: "warn" as BadgeKind, text: "candidate", tip: `Ban candidate (${b.pending.streak} of ${b.pending.needed} runs). Auto-ban after ${b.pending.needed} consecutive bad runs.` };
+  }
+  return { kind: "none" as BadgeKind, text: "—", tip: "Not banned. Global bans remove a provider from all models." };
 });
 
-const upTone = computed(() => (props.row.uptime < 0.97 ? "text-bad" : ""));
-const omTone = computed(() => ((props.row.outVsMedian ?? 0) > 1.5 ? "text-bad" : ""));
-const discTone = computed(() => (props.row.cacheKnown ? "" : "text-warn"));
-const vsTone = computed(() => ((props.row.vsBest ?? 0) > 0.5 ? "text-bad" : "text-muted-foreground"));
+const weights = computed(() => {
+  const f = filters.value;
+  const total = f.wPrice + f.wSpeed + f.wReliability || 1;
+  return { p: Math.round((f.wPrice / total) * 100), s: Math.round((f.wSpeed / total) * 100), r: Math.round((f.wReliability / total) * 100) };
+});
 
+function tipVerdict(e: Event) {
+  const title = props.row.verdict === "ok" ? "Verdict: ok" : `Verdict: ${props.row.verdict}`;
+  showTip(e, title, reasons.value.length ? reasons.value : [{ text: "Price, cache, uptime and quantization are within rules.", tone: "muted" }]);
+}
+function tipBan(e: Event) {
+  showTip(e, "Global ban status", [{ text: ban.value.tip, tone: "fg" }]);
+}
+function tipScore(e: Event) {
+  const s = props.row.scores;
+  const w = weights.value;
+  const speed = props.row.tps === null ? "—" : Math.round(s.speed);
+  showTip(e, "Overall score", [
+    { text: `Price ${Math.round(s.price)} × ${w.p}% + Speed ${speed} × ${w.s}% + Reliability ${Math.round(s.reliability)} × ${w.r}% = ${Math.round(s.overall)}`, tone: "fg" },
+  ]);
+}
+
+const upTone = computed(() => (props.row.uptime < (filters.value.minUptime ?? 97) / 100 ? "text-bad" : ""));
+const outThresholds = computed(() => settings.value?.filters.outliers ?? { outVsMedian: 1.5, hardOutVsMedian: 2.5 });
+const omTone = computed(() => {
+  const v = props.row.outVsMedian ?? 0;
+  return v >= outThresholds.value.hardOutVsMedian ? "text-bad" : v >= outThresholds.value.outVsMedian ? "text-warn" : "";
+});
+const discTone = computed(() => (props.row.cacheDiscount === null || props.row.cacheDiscount < 0.7 ? "text-warn" : ""));
+const vsTone = computed(() => {
+  const v = props.row.vsBest;
+  if (v === null) return "text-muted-foreground";
+  if (Math.abs(v) < 0.005) return "text-ok";
+  if (v < 0) return "text-muted-foreground";
+  return v > 0.5 ? "text-bad" : "";
+});
+const vsText = computed(() => {
+  const v = props.row.vsBest;
+  if (v === null) return "—";
+  if (Math.abs(v) < 0.005) return "best";
+  return `${v > 0 ? "+" : "−"}${pct(Math.abs(v))}`;
+});
+
+const horizonDays = computed(() => overview.value?.horizonDays ?? 7);
 const scenarioCosts = computed(() => {
   const r = props.row;
   const perDay = props.model.profile.inputPerDay;
-  return [{ name: "actual", h: props.model.h, r: props.model.r }, ...props.model.scenarios.filter((s) => s.name !== "actual")].map((s) => {
-    const cache = r.cacheKnown ? r.pCache : r.pIn;
-    const perM = (1 - s.h) * r.pIn + s.h * cache + s.r * r.pOut;
-    return { name: s.name, perM, horizon: (perM * perDay * horizonDays.value) / 1_000_000 };
-  });
+  return props.model.scenarios
+    .filter((s) => s.name !== "actual")
+    .map((s) => {
+      const perM = (1 - s.h) * r.pIn + s.h * r.pCache + s.r * r.pOut;
+      return {
+        name: s.name,
+        label: SCENARIOS.find((x) => x.value === s.name)?.label ?? s.name,
+        current: s.name === overview.value?.scenario.name,
+        perM,
+        horizon: (perM * perDay * horizonDays.value) / 1_000_000,
+      };
+    });
 });
 
 const series = computed(() => props.history.filter((p) => p.tag === props.row.tag));
 const outSeries = computed(() => series.value.map((p) => p.pOut));
 const upSeries = computed(() => series.value.map((p) => p.uptime));
-const outRange = computed(() => (outSeries.value.length ? `${price(Math.min(...outSeries.value))}–${price(Math.max(...outSeries.value))}` : "—"));
+const outRange = computed(() => (outSeries.value.length ? `$${price(Math.min(...outSeries.value))}–$${price(Math.max(...outSeries.value))}` : "—"));
 const upMin = computed(() => (upSeries.value.length ? uptime(Math.min(...upSeries.value)) : "—"));
+const detailReasons = computed<TipLine[]>(() => (reasons.value.length ? reasons.value : [{ text: "No issues found.", tone: "muted" }]));
 
-const horizonDays = computed(() => overview.value?.horizonDays ?? 7);
 const cell = "px-2.5 text-right";
 </script>
 
@@ -71,14 +139,14 @@ const cell = "px-2.5 text-right";
           <path d="m9 18 6-6-6-6"></path>
         </svg>
       </button>
-      <span :class="cn('tnum w-[22px] text-right font-semibold', dim && 'text-muted-foreground line-through', row.presetRank === null && !dim && 'font-normal text-muted-foreground')">{{ position }}</span>
+      <span :class="cn('tnum w-[22px] text-right font-semibold', row.presetRank === null && 'font-normal text-muted-foreground', dim && 'line-through')">{{ rankText }}</span>
       <div :class="cn('flex min-w-0 flex-col pl-1 leading-tight', dim && 'opacity-45')">
         <span class="font-medium">{{ row.providerName }}</span>
         <span class="font-mono text-[11px] text-muted-foreground">{{ row.tag }}</span>
       </div>
     </div>
     <div class="px-2.5" :class="dim && 'opacity-45'">
-      <StatusBadge :kind="quantKind">{{ row.quantization }}</StatusBadge>
+      <StatusBadge :kind="quantKind">{{ row.quant === "closed" ? "closed" : row.quantization }}</StatusBadge>
     </div>
     <template v-if="cols.zt">
       <div class="text-center" :class="dim && 'opacity-45'"><span v-if="row.zdr" class="text-ok">✓</span><span v-else class="text-muted-foreground">—</span></div>
@@ -87,17 +155,17 @@ const cell = "px-2.5 text-right";
     <div :class="cn(cell, 'tnum', dim && 'opacity-45')">{{ price(row.pIn) }}</div>
     <div :class="cn(cell, 'tnum', omTone, dim && 'opacity-45')">{{ price(row.pOut) }}</div>
     <div :class="cn(cell, 'tnum', dim && 'opacity-45')">{{ price(row.pCache) }}</div>
-    <div :class="cn(cell, 'tnum', discTone, dim && 'opacity-45')">{{ row.cacheDiscount === null ? "none" : `${Math.round(row.cacheDiscount * 100)}%` }}</div>
+    <div :class="cn(cell, 'tnum', discTone, dim && 'opacity-45')">{{ row.cacheDiscount === null ? "none" : pct(row.cacheDiscount) }}</div>
     <div :class="cn(cell, 'tnum', omTone, dim && 'opacity-45')">{{ row.outVsMedian === null ? "—" : `${row.outVsMedian.toFixed(2)}×` }}</div>
     <div :class="cn(cell, 'tnum', dim && 'opacity-45')">
       <span :class="upTone">{{ uptime(row.uptime) }}</span><span class="text-muted-foreground"> · {{ row.uptime30m === null ? "—" : uptime(row.uptime30m) }}</span>
     </div>
     <div :class="cn(cell, 'tnum', dim && 'opacity-45')">{{ row.tps === null ? "—" : Math.round(row.tps) }}</div>
-    <div v-if="cols.lat" :class="cn(cell, 'tnum', dim && 'opacity-45')">{{ row.latencyMs === null ? "—" : `${Math.round(row.latencyMs)} ms` }}</div>
-    <div v-if="cols.share" :class="cn(cell, 'tnum', dim && 'opacity-45')">{{ row.defaultShare > 0 ? `${Math.round(row.defaultShare * 100)}%` : "—" }}</div>
-    <div :class="cn(cell, 'tnum font-medium', dim && 'opacity-45')">${{ price(row.costPerM) }}</div>
-    <div :class="cn(cell, 'tnum', dim && 'opacity-45')">${{ price(row.costHorizon) }}</div>
-    <div :class="cn(cell, 'tnum', vsTone, dim && 'opacity-45')">{{ row.vsBest === null ? "—" : row.vsBest <= 0.0005 ? "best" : signedPct(row.vsBest) }}</div>
+    <div v-if="cols.lat" :class="cn(cell, 'tnum', dim && 'opacity-45')">{{ seconds(row.latencyMs) }}</div>
+    <div v-if="cols.share" :class="cn(cell, 'tnum', dim && 'opacity-45')">{{ row.defaultShare > 0 ? pct(row.defaultShare, 1) : "—" }}</div>
+    <div :class="cn(cell, 'tnum font-medium', dim && 'opacity-45')">{{ money(row.costPerM) }}</div>
+    <div :class="cn(cell, 'tnum', dim && 'opacity-45')">{{ money(row.costHorizon) }}</div>
+    <div :class="cn(cell, 'tnum', vsTone, dim && 'opacity-45')">{{ vsText }}</div>
     <div v-if="cols.brk" class="grid grid-cols-3 gap-2 px-2.5 text-[11.5px]" :class="dim && 'opacity-45'">
       <div>
         <div class="tnum text-right">{{ Math.round(row.scores.price) }}</div>
@@ -112,25 +180,33 @@ const cell = "px-2.5 text-right";
         <div class="h-[3px] rounded-[2px] bg-muted"><div class="h-[3px] rounded-[2px] bg-muted-foreground" :style="{ width: `${row.scores.reliability}%` }"></div></div>
       </div>
     </div>
-    <div class="px-2.5" :class="dim && 'opacity-45'" :title="`Price ${row.scores.price} · Speed ${row.scores.speed} · Reliability ${row.scores.reliability}`">
+    <div class="cursor-help px-2.5" :class="dim && 'opacity-45'" @mouseenter="tipScore" @mouseleave="hideTip">
       <div class="tnum text-[13px] font-bold">{{ Math.round(row.scores.overall) }}</div>
       <div class="h-1 rounded-[2px] bg-muted"><div class="h-1 rounded-[2px] bg-foreground" :style="{ width: `${row.scores.overall}%` }"></div></div>
     </div>
-    <div class="px-2.5" :title="verdictTitle"><StatusBadge :kind="verdictKind" class="cursor-help">{{ verdictText }}</StatusBadge></div>
-    <div class="px-2.5" :title="ban.title"><StatusBadge :kind="ban.kind" class="cursor-help">{{ ban.text }}</StatusBadge></div>
+    <div class="min-w-0 px-2.5" :class="dim && 'opacity-45'">
+      <span class="inline-flex max-w-full cursor-help" @mouseenter="tipVerdict" @mouseleave="hideTip">
+        <StatusBadge :kind="verdict.kind" class="max-w-full truncate">{{ verdict.text }}</StatusBadge>
+      </span>
+    </div>
+    <div class="px-2.5" :class="dim && 'opacity-45'">
+      <span class="inline-flex cursor-help" @mouseenter="tipBan" @mouseleave="hideTip">
+        <StatusBadge :kind="ban.kind">{{ ban.text }}</StatusBadge>
+      </span>
+    </div>
   </div>
   <div v-if="open" class="w-max min-w-full border-b border-border bg-muted">
     <div class="sticky left-0 grid w-[min(1120px,calc(100vw-90px))] grid-cols-[1.1fr_.9fr_1.2fr] gap-6 whitespace-normal py-3.5 pl-12 pr-4">
       <div>
-        <div class="mb-1.5 text-xs font-semibold">Cost by scenario <span class="font-normal text-muted-foreground">· {{ (model.profile.inputPerDay / 1_000_000).toFixed(1) }}M in/day</span></div>
+        <div class="mb-1.5 text-xs font-semibold">Cost by scenario <span class="font-normal text-muted-foreground">· {{ volume(model.profile.inputPerDay) }} in/day</span></div>
         <div class="tnum grid grid-cols-[1fr_auto_auto] gap-x-[18px] gap-y-1 text-[12.5px]">
           <span class="text-[11.5px] text-muted-foreground">Scenario</span>
           <span class="text-right text-[11.5px] text-muted-foreground">per 1M in</span>
-          <span class="text-right text-[11.5px] text-muted-foreground">per {{ horizonDays }} days</span>
+          <span class="text-right text-[11.5px] text-muted-foreground">per {{ periodLabel(horizonDays) }}</span>
           <template v-for="s in scenarioCosts" :key="s.name">
-            <span>{{ s.name }}</span>
-            <span class="text-right">${{ price(s.perM) }}</span>
-            <span class="text-right">${{ price(s.horizon) }}</span>
+            <span :class="s.current && 'font-semibold'">{{ s.label }}</span>
+            <span :class="['text-right', s.current && 'font-semibold']">{{ money(s.perM) }}</span>
+            <span :class="['text-right', s.current && 'font-semibold']">{{ money(s.horizon) }}</span>
           </template>
         </div>
       </div>
@@ -147,9 +223,8 @@ const cell = "px-2.5 text-right";
       <div>
         <div class="mb-1.5 text-xs font-semibold">Reasons</div>
         <div class="flex flex-col gap-1">
-          <div v-if="row.reasons.length === 0" class="flex gap-2 text-[12.5px]"><span class="text-ok">●</span><span>Within all rules</span></div>
-          <div v-for="r in row.reasons" :key="r" class="flex gap-2 text-[12.5px]">
-            <span :class="row.verdict === 'hard-bad' ? 'text-bad' : 'text-warn'">●</span><span class="text-pretty">{{ r }}</span>
+          <div v-for="r in detailReasons" :key="r.text" class="flex gap-2 text-[12.5px]">
+            <span :class="TONE_CLASS[r.tone]">●</span><span class="text-pretty">{{ r.text }}</span>
           </div>
         </div>
       </div>

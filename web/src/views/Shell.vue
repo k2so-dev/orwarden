@@ -4,11 +4,11 @@ import ConnectKey from "@/components/shell/ConnectKey.vue";
 import FilterBar from "@/components/shell/FilterBar.vue";
 import HeaderBar from "@/components/shell/HeaderBar.vue";
 import SettingsSheet from "@/components/settings/SettingsSheet.vue";
-import { ago } from "@/lib/format";
+import { ago, periodLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { SCENARIOS, filters } from "@/stores/filters";
 import { go, tab, TABS } from "@/stores/nav";
-import { hasData, loading, loadError, overview, presets, providers, refreshNow, status } from "@/stores/data";
+import { hasData, loading, loadError, overview, presets, providers, refreshing, refreshNow, status } from "@/stores/data";
 import { settingsOpen } from "@/stores/ui";
 import ModelsTab from "@/views/ModelsTab.vue";
 import PresetsTab from "@/views/PresetsTab.vue";
@@ -19,7 +19,9 @@ const ready = computed(() => overview.value !== null);
 const unreachable = computed(() => status.value?.health === "unreachable");
 const invalidKey = computed(() => status.value?.health === "invalid-key");
 const lastGood = computed(() => ago(status.value?.takenAt));
-const errorText = computed(() => status.value?.lastError?.message ?? loadError.value ?? "");
+const errorText = computed(() => status.value?.lastError?.message ?? loadError.value ?? "OpenRouter did not respond.");
+const skeleton = computed(() => refreshing.value || (loading.value && !ready.value));
+const noData = computed(() => !skeleton.value && !ready.value);
 
 const counts = computed(() => ({
   models: overview.value?.models.length ?? 0,
@@ -31,8 +33,8 @@ const pendingBans = computed(() => (providers.value?.pending.added.length ?? 0) 
 const context = computed(() => {
   const f = filters.value;
   const scenario = SCENARIOS.find((s) => s.value === f.scenario)?.label.replace("…", "") ?? f.scenario;
-  const volume = f.scenario === "actual" ? "real volume" : `${f.volumeM}M input / day`;
-  return `${scenario} · ${volume} · ${f.days} days · ${f.minQuant}+ · uptime ≥ ${f.minUptime}%`;
+  const volume = f.scenario === "actual" ? "actual volume" : `${f.volumeM}M input / day`;
+  return `${scenario} · ${volume} · ${periodLabel(f.days)} · ${f.minQuant}+ · uptime ≥ ${f.minUptime}%${f.zdrOnly ? " · ZDR only" : ""}`;
 });
 
 const tabLabel = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
@@ -53,7 +55,7 @@ const alertBox = "flex items-start gap-3 rounded-[10px] border border-bad bg-bad
           </svg>
           <div class="flex-1">
             <div class="text-[13.5px] font-semibold">OpenRouter unreachable</div>
-            <div class="text-[13px] text-foreground/85">{{ errorText }} Showing last good data from {{ lastGood }}.</div>
+            <div class="text-[13px] text-foreground/85">{{ errorText.replace(/\.?$/, ".") }} Showing last good data from {{ lastGood }} — writes will fail until it recovers.</div>
           </div>
           <button type="button" class="h-[30px] rounded-lg border border-border bg-background px-3 text-[13px] font-medium text-foreground" @click="refreshNow(false)">Retry</button>
         </div>
@@ -64,7 +66,7 @@ const alertBox = "flex items-start gap-3 rounded-[10px] border border-bad bg-bad
           </svg>
           <div class="flex-1">
             <div class="text-[13.5px] font-semibold">Management key rejected</div>
-            <div class="text-[13px] text-foreground/85">OpenRouter returned 401: the key was revoked or expired. Showing data from {{ lastGood }}; writes are disabled.</div>
+            <div class="text-[13px] text-foreground/85">OpenRouter returned 401 — the key was revoked or expired. Showing data from {{ lastGood }}; writes are disabled.</div>
           </div>
           <button type="button" class="h-[30px] rounded-lg bg-primary px-3 text-[13px] font-medium text-primary-foreground" @click="settingsOpen = true">Replace key</button>
         </div>
@@ -89,7 +91,7 @@ const alertBox = "flex items-start gap-3 rounded-[10px] border border-bad bg-bad
           </div>
           <div class="text-[12.5px] text-muted-foreground">{{ context }}</div>
         </div>
-        <template v-if="!ready || (loading && !hasData)">
+        <template v-if="skeleton">
           <div class="grid grid-cols-4 gap-3">
             <div v-for="n in 4" :key="n" class="flex h-28 flex-col gap-3 rounded-xl border border-border p-4">
               <div class="h-3 w-[45%] animate-pulse rounded-md bg-muted"></div>
@@ -99,9 +101,16 @@ const alertBox = "flex items-start gap-3 rounded-[10px] border border-bad bg-bad
           </div>
           <div class="flex flex-col gap-3 rounded-xl border border-border p-4">
             <div class="h-4 w-60 animate-pulse rounded-md bg-muted"></div>
-            <div v-for="n in 6" :key="n" class="h-3.5 animate-pulse rounded-md bg-muted"></div>
+            <div v-for="n in 8" :key="n" class="grid grid-cols-[200px_60px_repeat(8,1fr)] gap-3">
+              <div v-for="c in 10" :key="c" class="h-3.5 animate-pulse rounded-md bg-muted"></div>
+            </div>
           </div>
         </template>
+        <div v-else-if="noData" class="flex flex-col items-center gap-2.5 rounded-xl border border-dashed border-border px-6 py-12 text-center">
+          <div class="text-[15px] font-semibold">{{ hasData ? "Data could not be loaded" : "No data yet" }}</div>
+          <div class="max-w-[440px] text-[13.5px] text-muted-foreground">{{ hasData ? errorText : "Run the first refresh to read providers, prices and your traffic from OpenRouter." }}</div>
+          <button type="button" class="mt-1.5 h-[34px] rounded-lg bg-primary px-3.5 text-[13px] font-medium text-primary-foreground" @click="refreshNow(false)">Refresh now</button>
+        </div>
         <template v-else>
           <ModelsTab v-if="tab === 'models'" />
           <ProvidersTab v-else-if="tab === 'providers'" />

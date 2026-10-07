@@ -10,7 +10,7 @@ const KINDS: Record<BadgeKind, string> = {
   bad: "bg-bad-bg text-bad",
   mute: "bg-muted text-muted-foreground",
   out: "border border-border text-foreground",
-  none: "border border-border text-muted-foreground",
+  none: "text-muted-foreground",
 };
 
 const props = withDefaults(defineProps<{ kind: BadgeKind; mono?: boolean; class?: string }>(), { mono: false, class: "" });

@@ -11,7 +11,7 @@ const props = defineProps<{ model: ModelView; horizonLabel: string }>();
 type SortKey = "rank" | "in" | "out" | "cache" | "disc" | "om" | "up" | "tps" | "lat" | "share" | "perM" | "hz" | "vs" | "overall";
 
 const VALUE: Record<SortKey, (e: EndpointView, i: number) => number> = {
-  rank: (_, i) => i,
+  rank: (e, i) => (e.presetRank ?? 1000) * 1e6 + (e.eligible ? 0 : 1e5) + (100 - e.scores.overall) * 100 + i / 1000,
   in: (e) => e.pIn,
   out: (e) => e.pOut,
   cache: (e) => e.pCache,
@@ -35,25 +35,26 @@ const rows = computed(() => {
     seen.set(e.tag, n + 1);
     return { e, i, id: `${e.tag}:${n}` };
   });
-  if (key === "rank") return indexed.map(({ e, id }, n) => ({ e, id, position: n + 1 }));
-  const get = VALUE[key as SortKey];
+  const ranked = [...indexed].sort((a, b) => VALUE.rank(a.e, a.i) - VALUE.rank(b.e, b.i));
+  const position = new Map(ranked.map((x, n) => [x.id, n + 1]));
+  const get = VALUE[(key in VALUE ? key : "rank") as SortKey];
   const sign = dir === "asc" ? 1 : -1;
   return indexed
     .map((x) => ({ ...x, v: get(x.e, x.i) }))
     .sort((a, b) => (a.v - b.v) * sign || a.i - b.i)
-    .map(({ e, i, id }) => ({ e, id, position: i + 1 }));
+    .map(({ e, id }) => ({ e, id, position: position.get(id)! }));
 });
 
 const template = computed(() => {
   const c = columns.value;
-  const parts = ["300px", "76px"];
-  if (c.zt) parts.push("52px", "52px");
-  parts.push("70px", "70px", "78px", "88px", "84px", "136px", "70px");
-  if (c.lat) parts.push("84px");
-  if (c.share) parts.push("66px");
-  parts.push("92px", "92px", "84px");
-  if (c.brk) parts.push("190px");
-  parts.push("96px", "210px", "190px");
+  const parts = ["236px", "76px"];
+  if (c.zt) parts.push("46px", "50px");
+  parts.push("62px", "62px", "70px", "66px", "70px", "116px", "60px");
+  if (c.lat) parts.push("64px");
+  if (c.share) parts.push("64px");
+  parts.push("78px", "88px", "70px");
+  if (c.brk) parts.push("156px");
+  parts.push("78px", "150px", "minmax(136px,1fr)");
   return parts.join(" ");
 });
 
@@ -99,7 +100,7 @@ const indicator = (key: string | null) => (key && sortState.value.key === key ? 
       :style="{ gridTemplateColumns: template }"
     >
       <div class="sticky left-0 z-[2] flex h-full items-center gap-2.5 border-r border-border bg-muted px-3">
-        <span class="w-12 cursor-pointer text-right" @click="sortBy('rank')">#{{ indicator("rank") }}</span>
+        <span class="w-[52px] cursor-pointer text-right hover:text-foreground" @click="sortBy('rank')">#{{ indicator("rank") }}</span>
         <span>Provider · endpoint</span>
       </div>
       <div

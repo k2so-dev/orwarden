@@ -27,7 +27,7 @@ async function submit(): Promise<void> {
 
 <template>
   <main class="grid min-h-screen place-items-center bg-background p-5">
-    <form class="flex w-[380px] max-w-full flex-col gap-[18px] rounded-xl border border-border bg-card p-7 shadow-sm" @submit.prevent="submit">
+    <form class="flex w-[380px] max-w-full flex-col gap-[18px] rounded-xl border border-border bg-card p-7 shadow-sm dark:bg-[oklch(0.205_0_0)]" @submit.prevent="submit">
       <div class="flex flex-col items-center gap-2.5 text-center">
         <div class="grid size-9 place-items-center rounded-[9px] bg-primary font-mono text-lg font-semibold text-primary-foreground">r</div>
         <div>
