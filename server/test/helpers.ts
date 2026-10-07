@@ -96,7 +96,7 @@ export function mockClient(opts: {
       (fixture.endpoints as RawEndpoint[])
         .filter((e) => fixture.zdrTags.includes(e.tag))
         .map((e) => ({ ...e, model_id: DEEPSEEK })),
-    listModels: async () => [{ id: DEEPSEEK, name: "DeepSeek V4.1 Flash" }],
+    listModels: async () => [{ id: DEEPSEEK, name: "DeepSeek V4.1 Flash", hugging_face_id: "deepseek-ai/DeepSeek-V4.1-Flash" }],
     getPreset: async (slug) => presets.get(slug) ?? null,
     upsertPreset: async (slug, config) => {
       calls.presets.push({ slug, config: structuredClone(config) });

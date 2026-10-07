@@ -38,7 +38,8 @@ const times = (v: number) => `${v >= 10 ? Math.round(v) : +v.toFixed(1)}x`;
 
 export function classifyModel(model: ModelInput, config: Config): ClassifiedModel {
   const { minUptime, outliers } = config.filters;
-  const minRank = modelMinQuantRank(model.slug, config);
+  const open = model.openWeights !== false;
+  const minRank = open ? modelMinQuantRank(model.slug, config) : 0;
   const quantOk = model.endpoints.filter((e) => quantRank(e.quantization) >= minRank);
   const pool = quantOk.length > 0 ? quantOk : model.endpoints;
   const medOut = median(pool.map((e) => e.pOut));
@@ -51,11 +52,14 @@ export function classifyModel(model: ModelInput, config: Config): ClassifiedMode
     const soft: string[] = [];
     let output = false;
     let cache = false;
-    if (quantRank(e.quantization) === 0) hard.push("unknown quant");
-    else if (quantRank(e.quantization) < minRank) hard.push(`${e.quantization} quant`);
+    if (open && quantRank(e.quantization) === 0) hard.push("unknown quant");
+    else if (open && quantRank(e.quantization) < minRank) hard.push(`${e.quantization} quant`);
     const rank = quantRank(e.quantization);
     if (e.uptime < minUptime) hard.push(`uptime ${pct(e.uptime)}`);
-    if (medOut > 0 && e.pOut > outliers.outVsMedian * medOut) {
+    if (medOut > 0 && e.pOut > outliers.hardOutVsMedian * medOut) {
+      output = true;
+      hard.push(`output ${times(e.pOut / medOut)} median`);
+    } else if (medOut > 0 && e.pOut > outliers.outVsMedian * medOut) {
       output = true;
       soft.push(`output ${times(e.pOut / medOut)} median`);
     }
@@ -68,8 +72,9 @@ export function classifyModel(model: ModelInput, config: Config): ClassifiedMode
     return {
       ...e,
       cls,
-      quant: rank === 0 ? ("unknown" as const) : rank < minRank ? ("low" as const) : ("ok" as const),
+      quant: !open ? ("closed" as const) : rank === 0 ? ("unknown" as const) : rank < minRank ? ("low" as const) : ("ok" as const),
       reasons: [...hard, ...soft],
+      issues: [...hard.map((text) => ({ level: "bad" as const, text })), ...soft.map((text) => ({ level: "warn" as const, text }))],
       cEff,
       score: cEff * penalty({ hard: hard.length > 0, output, cache }, config),
       weight: routingWeight(e, model.h, rScore, config.optimizer.routingPrice),

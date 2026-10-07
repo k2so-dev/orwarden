@@ -12,6 +12,7 @@ export const ScenarioSchema = z.object({
 
 export const SettingsSchema = z.object({
   mode: z.enum(["dry-run", "apply"]),
+  workspaceId: z.string().nullable(),
   refreshCron: z.string().min(9).max(100),
   usageWindowDays: z.number().int().min(1).max(30),
   defaultProfile: z.object({ h: ratio, r: z.number().min(0).max(50) }),
@@ -24,7 +25,7 @@ export const SettingsSchema = z.object({
     minUptime: ratio,
     minTps: z.number().min(0),
     slowPenalty: z.number().min(1),
-    outliers: z.object({ outVsMedian: positive, cacheRatioVsMedian: positive, minHForCacheRule: ratio }),
+    outliers: z.object({ outVsMedian: positive, hardOutVsMedian: positive, cacheRatioVsMedian: positive, minHForCacheRule: ratio }),
   }),
   optimizer: z.object({
     minEndpointsPerModel: z.number().int().min(1).max(10),
@@ -36,11 +37,12 @@ export const SettingsSchema = z.object({
     penalties: z.object({ hardBad: z.number().min(1), outputOutlier: z.number().min(1), cacheOutlier: z.number().min(1) }),
     hysteresis: z.object({ banAfterRuns: z.number().int().min(1), unbanAfterRuns: z.number().int().min(1) }),
   }),
-  scoring: z.object({ price: z.number().min(0), speed: z.number().min(0), reliability: z.number().min(0) }),
+  scoring: z.object({ price: z.number().min(0), speed: z.number().min(0), reliability: z.number().min(0), unknownQuantPenalty: z.number().min(0).max(100) }),
   presets: z.object({
     topN: z.number().int().min(1).max(20),
     slugPattern: z.string().includes("{model}"),
     defaultScenario: z.string(),
+    rankBy: z.enum(["score", "cost"]),
   }),
   scenarios: z.object({
     days: z.number().int().min(1).max(365),
@@ -62,6 +64,7 @@ export type Scenario = z.infer<typeof ScenarioSchema>;
 
 export const DEFAULT_SETTINGS: Settings = {
   mode: "dry-run",
+  workspaceId: null,
   refreshCron: "0 * * * *",
   usageWindowDays: 7,
   defaultProfile: { h: 0.5, r: 0.2 },
@@ -74,7 +77,7 @@ export const DEFAULT_SETTINGS: Settings = {
     minUptime: 0.97,
     minTps: 0,
     slowPenalty: 1.2,
-    outliers: { outVsMedian: 1.5, cacheRatioVsMedian: 3, minHForCacheRule: 0.3 },
+    outliers: { outVsMedian: 1.5, hardOutVsMedian: 2.5, cacheRatioVsMedian: 3, minHForCacheRule: 0.3 },
   },
   optimizer: {
     minEndpointsPerModel: 2,
@@ -86,8 +89,8 @@ export const DEFAULT_SETTINGS: Settings = {
     penalties: { hardBad: 3, outputOutlier: 5, cacheOutlier: 1.5 },
     hysteresis: { banAfterRuns: 2, unbanAfterRuns: 3 },
   },
-  scoring: { price: 60, speed: 20, reliability: 20 },
-  presets: { topN: 5, slugPattern: "{model}-safe", defaultScenario: "actual" },
+  scoring: { price: 60, speed: 20, reliability: 20, unknownQuantPenalty: 15 },
+  presets: { topN: 5, slugPattern: "{model}-safe", defaultScenario: "actual", rankBy: "score" },
   scenarios: {
     days: 7,
     inputTokensPerDay: 1_000_000,

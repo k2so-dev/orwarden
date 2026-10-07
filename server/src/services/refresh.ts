@@ -26,14 +26,20 @@ export async function takeSnapshot(client: OpenRouterApi, rt: Runtime): Promise<
   const now = rt.now();
   const key = await client.getKey();
   const workspaces = await client.listWorkspaces();
-  const ws = workspaces.find((w) => w.id === key.workspace_id) ?? (workspaces.length === 1 ? workspaces[0] : undefined);
+  const ws =
+    workspaces.find((w) => w.id === settings.workspaceId) ??
+    workspaces.find((w) => w.id === key.workspace_id) ??
+    (workspaces.length === 1 ? workspaces[0] : undefined);
   if (!ws?.default_guardrail_id) throw new Error(`workspace ${key.workspace_id ?? "(unknown)"} has no default guardrail`);
   const guardrail = await client.getGuardrail(ws.default_guardrail_id);
-  const snapshot = await collect(client, settings, guardrail, now);
-  const catalog = (await client.listModels()).map((m) => ({ id: m.id, name: m.name })).sort((a, b) => a.id.localeCompare(b.id));
+  const listed = await client.listModels();
+  const openWeights = new Set(listed.filter((m) => Boolean(m.hugging_face_id)).map((m) => m.id));
+  const snapshot = await collect(client, settings, guardrail, now, openWeights);
+  const catalog = listed.map((m) => ({ id: m.id, name: m.name })).sort((a, b) => a.id.localeCompare(b.id));
   return {
     takenAt: snapshot.takenAt,
     workspace: { id: ws.id, name: ws.name ?? ws.id, guardrailId: ws.default_guardrail_id },
+    workspaces: workspaces.map((w) => ({ id: w.id, name: w.name ?? w.id })),
     key: { label: key.label ?? null, expiresAt: key.expires_at ?? null },
     guardrail,
     models: snapshot.models,
@@ -65,10 +71,21 @@ function hysteresisStep(rt: Runtime, snapshot: AppSnapshot): Decision[] {
     const base = objective(models, banned, baseline);
     return base > 0 ? priority(p) / base : null;
   };
+  const { banAfterRuns, unbanAfterRuns } = settings.optimizer.hysteresis;
+  const worst = (p: string) => {
+    const eps = models.flatMap((m) => m.endpoints.filter((e) => e.provider === p));
+    const bad = eps.find((e) => e.cls === "hard-bad") ?? eps.find((e) => e.cls === "outlier");
+    return bad ? `${bad.cls} ${bad.reasons[0] ?? ""}`.trim() : "cost";
+  };
   return [
     ...hy.changes
       .filter((c) => !pre.reverted.some((r) => r.provider === c.provider))
-      .map((c) => ({ provider: c.provider, action: c.action, reason: c.action === "ban" ? "optimizer target" : "no longer in target", delta: pct(c.provider) })),
+      .map((c) => ({
+        provider: c.provider,
+        action: c.action,
+        reason: c.action === "ban" ? `${worst(c.provider)} · ${banAfterRuns} of ${banAfterRuns} runs` : `recovered · ${unbanAfterRuns} of ${unbanAfterRuns} runs`,
+        delta: pct(c.provider),
+      })),
     ...hy.pending.map((p) => ({
       provider: p.provider,
       action: `pending-${p.action}`,

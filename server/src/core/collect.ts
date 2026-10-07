@@ -73,6 +73,7 @@ export async function collect(
   config: Config,
   guardrail: Guardrail,
   now: Date,
+  openWeights: ReadonlySet<string> | null = null,
 ): Promise<Snapshot> {
   const usage = aggregateUsage(await client.getActivity(), config.usageWindowDays, now);
   const excluded = new Set(config.excludedModels);
@@ -113,7 +114,7 @@ export async function collect(
     const endpoints = (zdrOnly.length > 0 ? zdrOnly : raw)
       .map((e) => normalizeEndpoint(e, isZdr(e)))
       .sort((a, b) => a.tag.localeCompare(b.tag) || a.pIn - b.pIn);
-    models.push({ ...input, name: raw[0]?.model_name ?? input.slug, endpoints });
+    models.push({ ...input, name: raw[0]?.model_name ?? input.slug, openWeights: openWeights ? openWeights.has(base) : true, endpoints });
   }
   return { takenAt: now.toISOString(), models, skipped };
 }

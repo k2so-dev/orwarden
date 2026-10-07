@@ -43,7 +43,7 @@ export function lowQuantProviders(models: ClassifiedModel[]): string[] {
   for (const m of models) {
     for (const e of m.endpoints) {
       if (e.quant === "low") low.add(e.provider);
-      else if (e.quant === "ok") good.add(e.provider);
+      else if (e.quant === "ok" || e.quant === "closed") good.add(e.provider);
     }
   }
   return [...low].filter((p) => !good.has(p)).sort();

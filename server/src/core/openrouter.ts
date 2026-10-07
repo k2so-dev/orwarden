@@ -61,6 +61,7 @@ export type CatalogModel = {
   id: string;
   name: string;
   context_length?: number | null;
+  hugging_face_id?: string | null;
   pricing?: RawPricing;
 };
 

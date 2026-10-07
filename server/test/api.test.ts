@@ -122,6 +122,8 @@ describe("api flow", () => {
     const plan = await ctx.call("/api/bans/apply", { method: "POST", body: { dryRun: true } });
     expect(plan.body.dryRun).toBe(true);
     expect(plan.body.added).toEqual(["dekallm"]);
+    expect(plan.body.cost.before).toBeGreaterThan(0);
+    expect(plan.body.cost.after).not.toBeNull();
     expect(ctx.mock.calls.patches).toEqual([]);
     const discard = await ctx.call("/api/bans/discard", { method: "POST" });
     expect(discard.status).toBe(200);
@@ -163,6 +165,11 @@ describe("api flow", () => {
     expect(p.status).toBe("not-created");
     expect(p.config.provider.only.length).toBeLessThanOrEqual(5);
     expect(p.config.provider.quantizations).not.toContain("fp4");
+    expect(p.ranked[0].pIn).toBeGreaterThan(0);
+    expect(p.ranked.reduce((a: number, e: any) => a + e.share, 0)).toBeCloseTo(1, 5);
+    expect(p.perM.preset).toBeGreaterThan(0);
+    expect(p.scenarios.map((s: any) => s.name)).toContain("agent");
+    expect(p.cheapest.costPerM).toBeLessThanOrEqual(p.ranked[0].costPerM);
     const sync = await ctx.call("/api/presets/sync", { method: "POST", body: { models: [DEEPSEEK] } });
     expect(sync.body[0].status).toBe("synced");
     expect(ctx.mock.calls.presets[0]!.slug).toBe(p.slug);
@@ -175,6 +182,14 @@ describe("api flow", () => {
     expect(bad.status).toBe(400);
     const good = await ctx.call("/api/presets/settings", { method: "PUT", body: { model: DEEPSEEK, slug: "flash", autoSync: true } });
     expect(good.body.slug).toBe("flash");
+  });
+
+  test("presets can rank by effective cost", async () => {
+    await ctx.call("/api/refresh", { method: "POST", body: {} });
+    await ctx.call("/api/settings", { method: "PUT", body: { presets: { rankBy: "cost" } } });
+    const { body } = await ctx.call("/api/presets");
+    const ranked = body.find((x: any) => x.model === DEEPSEEK).ranked;
+    for (let i = 1; i < ranked.length; i++) expect(ranked[i].effectivePerM).toBeGreaterThanOrEqual(ranked[i - 1].effectivePerM);
   });
 
   test("settings are validated and persisted", async () => {

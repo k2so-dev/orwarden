@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { optimize } from "../src/core/optimizer.ts";
+import { classifyModel } from "../src/core/classify.ts";
 import { deepseekModel, ep, model, testConfig } from "./helpers.ts";
 
 describe("classification on DeepSeek V4.1 Flash fixture", () => {
@@ -17,6 +18,22 @@ describe("classification on DeepSeek V4.1 Flash fixture", () => {
 
   test("deepinfra is ok", () => {
     expect(byTag.get("deepinfra/fp8")!.cls).toBe("ok");
+  });
+
+  test("closed models are not judged by quantization", () => {
+    const eps = [ep("alpha", 1, 2, 0.5, { quantization: "unknown" }), ep("beta", 1, 2, 0.5, { quantization: "unknown" })];
+    const closed = classifyModel({ slug: "openai/gpt-x", name: "x", usageUsd: 1, inputTokens: 0, h: 0, r: 1, source: "usage", openWeights: false, endpoints: eps }, config);
+    expect(closed.endpoints.every((e) => e.cls === "ok" && e.quant === "closed")).toBe(true);
+    const open = classifyModel({ slug: "vendor/open-x", name: "x", usageUsd: 1, inputTokens: 0, h: 0, r: 1, source: "usage", endpoints: eps }, config);
+    expect(open.endpoints.every((e) => e.cls === "hard-bad")).toBe(true);
+  });
+
+  test("output above the hard threshold is hard-bad", () => {
+    const m = model(config, "vendor/m", 1, [ep("a", 1, 2, 0.5), ep("b", 1, 2, 0.5), ep("c", 1, 2.2, 0.5), ep("d", 1, 6, 0.5)], 0, 1);
+    const byTag = new Map(m.endpoints.map((e) => [e.tag, e]));
+    expect(byTag.get("d")!.cls).toBe("hard-bad");
+    expect(byTag.get("d")!.issues[0]!.level).toBe("bad");
+    expect(byTag.get("c")!.cls).toBe("ok");
   });
 
   test("cache rule is skipped for low cache hit profiles", () => {

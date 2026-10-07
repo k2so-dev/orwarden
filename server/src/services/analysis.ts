@@ -5,13 +5,14 @@ import { pricePerMillion } from "../core/forecast.ts";
 import type { ProviderState } from "../core/hysteresis.ts";
 import type { Guardrail } from "../core/openrouter.ts";
 import { admissibleCount, optimize, totalCount, violations, type Violation } from "../core/optimizer.ts";
-import type { ClassifiedEndpoint, ClassifiedModel, ModelInput } from "../core/types.ts";
+import type { ClassifiedEndpoint, ClassifiedModel, Issue, ModelInput } from "../core/types.ts";
 import type { Policy, PresetSettings, RunRecord } from "../db.ts";
 import type { Settings } from "../settings.ts";
 
 export type AppSnapshot = {
   takenAt: string;
   workspace: { id: string; name: string; guardrailId: string };
+  workspaces?: { id: string; name: string }[];
   key: { label: string | null; expiresAt: string | null };
   guardrail: Guardrail;
   models: ModelInput[];
@@ -57,7 +58,7 @@ export type EndpointView = {
   provider: string;
   providerName: string;
   quantization: string;
-  quant: "ok" | "low" | "unknown";
+  quant: ClassifiedEndpoint["quant"];
   zdr: boolean;
   tools: boolean;
   pIn: number;
@@ -77,6 +78,7 @@ export type EndpointView = {
   scores: Scores;
   verdict: ClassifiedEndpoint["cls"];
   reasons: string[];
+  issues: Issue[];
   eligible: boolean;
   presetRank: number | null;
   ban: BanStatus;
@@ -88,6 +90,7 @@ export type ModelView = {
   slug: string;
   name: string;
   source: ModelInput["source"];
+  openWeights: boolean;
   usageUsd: number;
   h: number;
   r: number;
@@ -97,8 +100,10 @@ export type ModelView = {
   cost: CostTriple;
   scenarios: ({ name: string; tools: boolean; h: number; r: number } & CostTriple)[];
   endpoints: EndpointView[];
-  warnings: string[];
+  warnings: Warning[];
 };
+
+export type Warning = { level: "bad" | "warn"; title: string; text: string };
 
 export type Overview = {
   takenAt: string;
@@ -186,7 +191,7 @@ export function scoreEndpoints(
   endpoints: ClassifiedEndpoint[],
   profile: Profile,
   pool: ClassifiedEndpoint[],
-  weights: { price: number; speed: number; reliability: number },
+  weights: { price: number; speed: number; reliability: number; unknownQuantPenalty?: number },
 ): Map<ClassifiedEndpoint, Scores> {
   const base = pool.length > 0 ? pool : endpoints;
   const costs = base.map((e) => unitCost(e, profile.h, profile.r)).filter((c) => c > 0);
@@ -204,7 +209,8 @@ export function scoreEndpoints(
     const speed = (0.7 * tpsPart + 0.3 * latPart) * 100;
     const uptime = e.uptime30m === null ? e.uptime : 0.8 * e.uptime + 0.2 * e.uptime30m;
     const reliability = clamp((uptime - 0.9) / 0.1) * 100;
-    const overall = (price * weights.price + speed * weights.speed + reliability * weights.reliability) / total;
+    const penalty = e.quant === "unknown" ? (weights.unknownQuantPenalty ?? 0) : 0;
+    const overall = Math.max(0, (price * weights.price + speed * weights.speed + reliability * weights.reliability) / total - penalty);
     out.set(e, { price: round(price), speed: round(speed), reliability: round(reliability), overall: round(overall) });
   }
   return out;
@@ -222,15 +228,36 @@ export function rankForPreset(
   preset: PresetSettings | undefined,
   topN: number,
   zdrOnly: boolean,
+  rankBy: Settings["presets"]["rankBy"] = "score",
 ): ClassifiedEndpoint[] {
   const excluded = new Set(preset?.excluded ?? []);
   const eligible = model.endpoints.filter((e) => isEligible(e, profile, banned, zdrOnly) && !excluded.has(e.tag));
   const pinned = (preset?.pinned ?? []).map((t) => eligible.find((e) => e.tag === t)).filter((e): e is ClassifiedEndpoint => Boolean(e));
   const rest = eligible
     .filter((e) => !pinned.includes(e))
-    .sort((a, b) => scores.get(b)!.overall - scores.get(a)!.overall || a.tag.localeCompare(b.tag));
+    .sort(
+      (a, b) =>
+        (rankBy === "cost" ? effectivePerM(a, profile) - effectivePerM(b, profile) : 0) ||
+        scores.get(b)!.overall - scores.get(a)!.overall ||
+        a.tag.localeCompare(b.tag),
+    );
   const seen = new Set<string>();
   return [...pinned, ...rest].filter((e) => !seen.has(e.tag) && Boolean(seen.add(e.tag))).slice(0, topN);
+}
+
+export function effectivePerM(e: ClassifiedEndpoint, profile: { h: number; r: number }): number {
+  return unitCost(e, profile.h, profile.r) / Math.max(e.uptime, 0.01);
+}
+
+export function orderedShares(ranked: ClassifiedEndpoint[]): number[] {
+  let reach = 1;
+  const served = ranked.map((e) => {
+    const s = reach * e.uptime;
+    reach *= 1 - e.uptime;
+    return s;
+  });
+  const total = served.reduce((a, b) => a + b, 0);
+  return served.map((s) => (total > 0 ? s / total : 0));
 }
 
 export function orderedPrice(ranked: ClassifiedEndpoint[], h: number, r: number): number | null {
@@ -272,7 +299,7 @@ export function presetConfig(model: ClassifiedModel, ranked: ClassifiedEndpoint[
       order: tags,
       only: tags,
       allow_fallbacks: true,
-      quantizations: allowedQuantizations(model.slug, settings),
+      ...(model.openWeights !== false ? { quantizations: allowedQuantizations(model.slug, settings) } : {}),
       ...(profile.tools ? { require_parameters: true } : {}),
     },
   };
@@ -317,10 +344,11 @@ function calcModel(input: ModelInput, ctx: Ctx, vs: Settings, current: Set<strin
     price: ctx.q.wPrice ?? ctx.settings.scoring.price,
     speed: ctx.q.wSpeed ?? ctx.settings.scoring.speed,
     reliability: ctx.q.wReliability ?? ctx.settings.scoring.reliability,
+    unknownQuantPenalty: ctx.settings.scoring.unknownQuantPenalty,
   };
   const pool = model.endpoints.filter((e) => isEligible(e, profile, desired, zdrOnly));
   const scores = scoreEndpoints(model.endpoints, profile, pool, weights);
-  const ranked = rankForPreset(model, profile, desired, scores, ctx.presets.get(model.slug), ctx.settings.presets.topN, zdrOnly);
+  const ranked = rankForPreset(model, profile, desired, scores, ctx.presets.get(model.slug), ctx.settings.presets.topN, zdrOnly, ctx.settings.presets.rankBy);
   return { model, profile, scores, ranked, shares: routingShares(model, current, profile.tools, ctx.settings) };
 }
 
@@ -351,13 +379,13 @@ export function buildOverview(ctx: Ctx): Overview {
     summary.default += cost.default ?? 0;
     summary.bans += cost.bans ?? 0;
     summary.presets += cost.preset ?? cost.bans ?? 0;
-    const risky = model.endpoints.reduce((s, e) => s + (e.quant !== "ok" ? shares.get(e)! : 0), 0);
+    const risky = model.endpoints.reduce((s, e) => s + (e.quant === "low" || e.quant === "unknown" ? shares.get(e)! : 0), 0);
     riskVolume += risky * profile.inputPerDay;
     volume += profile.inputPerDay;
 
     const eligibleCosts = ranked.map((e) => unitCost(e, profile.h, profile.r));
     const best = eligibleCosts.length ? Math.min(...eligibleCosts) : null;
-    const quantOk = model.endpoints.filter((e) => e.quant === "ok");
+    const quantOk = model.endpoints.filter((e) => e.quant === "ok" || e.quant === "closed");
     const medOut = median((quantOk.length ? quantOk : model.endpoints).map((e) => e.pOut));
     const endpoints = model.endpoints
       .map((e): EndpointView => {
@@ -388,6 +416,7 @@ export function buildOverview(ctx: Ctx): Overview {
           scores: scores.get(e)!,
           verdict: e.cls,
           reasons: e.reasons,
+          issues: e.issues,
           eligible: isEligible(e, profile, desired, q.zdrOnly ?? false),
           presetRank: rank >= 0 ? rank + 1 : null,
           ban: banStatus(e.provider, ctx.bans, current, desired, settings),
@@ -401,23 +430,26 @@ export function buildOverview(ctx: Ctx): Overview {
       ...settings.scenarios.profiles.map((p) => ({ name: p.name, tools: p.tools, h: p.h, r: p.r })),
     ].map((s) => {
       const p = resolveProfile(input, settings, { ...q, scenario: s.name });
-      const sCalc = s.name === profile.name ? calc : { ...calc, ranked: rankForPreset(model, p, desired, scoreEndpoints(model.endpoints, p, model.endpoints.filter((e) => isEligible(e, p, desired, q.zdrOnly ?? false)), settings.scoring), ctx.presets.get(model.slug), settings.presets.topN, q.zdrOnly ?? false) };
+      const sCalc = s.name === profile.name ? calc : { ...calc, ranked: rankForPreset(model, p, desired, scoreEndpoints(model.endpoints, p, model.endpoints.filter((e) => isEligible(e, p, desired, q.zdrOnly ?? false)), settings.scoring), ctx.presets.get(model.slug), settings.presets.topN, q.zdrOnly ?? false, settings.presets.rankBy) };
       return { ...s, ...costs(sCalc, current, desired, p.h, p.r, p.tools, p.inputPerDay, days, settings) };
     });
 
-    const warnings: string[] = [];
+    const warnings: Warning[] = [];
     const k = settings.optimizer.minEndpointsPerModel;
-    if (ranked.length === 0) warnings.push("No endpoint passes the quality rules: a preset cannot be built.");
-    else if (admissibleCount(model, desired) < Math.min(k, admissibleCount(model, new Set()))) {
-      warnings.push(`Fewer than ${k} good providers remain after global bans.`);
+    const minQuant = vs.filters.minQuantization;
+    if (ranked.length === 0) {
+      warnings.push({ level: "bad", title: input.openWeights !== false ? `No ${minQuant}+ provider.` : "No eligible provider.", text: "No endpoint passes the quality rules, so a safe preset cannot be built." });
+    } else if (admissibleCount(model, desired) < Math.min(k, admissibleCount(model, new Set()))) {
+      warnings.push({ level: "warn", title: `Fewer than ${k} good providers.`, text: "Global bans leave too few good endpoints for this model." });
     }
-    if (totalCount(model, desired) === 0) warnings.push("Global bans leave this model without providers.");
-    if (profile.estimated) warnings.push("No traffic in the usage window: volume uses the default tokens per day.");
+    if (totalCount(model, desired) === 0) warnings.push({ level: "bad", title: "No providers left.", text: "Global bans remove every endpoint of this model." });
+    if (profile.estimated) warnings.push({ level: "warn", title: "No recent traffic.", text: "Volume uses the default tokens per day." });
 
     return {
       slug: model.slug,
       name: input.name,
       source: input.source,
+      openWeights: input.openWeights !== false,
       usageUsd: input.usageUsd,
       h: input.h,
       r: input.r,
@@ -566,19 +598,48 @@ export function buildProviders(ctx: Ctx): ProvidersView {
 
 export type RemotePreset = { hash: string | null; version: number | null; updatedAt: string | null } | null;
 
+export type PresetEndpoint = {
+  rank: number;
+  tag: string;
+  provider: string;
+  providerName: string;
+  quantization: string;
+  pIn: number;
+  pOut: number;
+  pCache: number;
+  cacheKnown: boolean;
+  costPerM: number;
+  effectivePerM: number;
+  share: number;
+  costHorizon: number;
+  vsCheapest: number | null;
+  uptime: number;
+  tps: number | null;
+  overall: number;
+  pinned: boolean;
+};
+
+export type PresetScenario = { name: string; h: number; r: number; tools: boolean; inputPerDay: number; default: number | null; preset: number | null };
+
 export type PresetView = {
   model: string;
   name: string;
+  openWeights: boolean;
   slug: string;
   presetId: string;
   profile: Profile;
+  horizonDays: number;
   autoSync: boolean;
   pinned: string[];
   excluded: string[];
-  ranked: { rank: number; tag: string; provider: string; providerName: string; quantization: string; costPerM: number; uptime: number; tps: number | null; overall: number }[];
+  rankBy: Settings["presets"]["rankBy"];
+  ranked: PresetEndpoint[];
+  cheapest: { tag: string; providerName: string; costPerM: number } | null;
   eligibleCount: number;
-  policy: { quantizations: string[]; zdr: boolean; tools: boolean; fallbacks: boolean };
+  policy: { quantizations: string[]; minQuantization: string | null; zdr: boolean; tools: boolean; fallbacks: boolean };
+  perM: { default: number | null; preset: number | null };
   cost: { default: number | null; preset: number | null; saving: number | null; savingPct: number | null };
+  scenarios: PresetScenario[];
   config: ReturnType<typeof presetConfig>;
   hash: string;
   status: "empty" | "not-created" | "up-to-date" | "out-of-date" | "unknown";
@@ -606,34 +667,83 @@ export function buildPresets(ctx: Ctx, remote: ReadonlyMap<string, RemotePreset>
       const r = remote.has(slug) ? remote.get(slug)! : undefined;
       const status: PresetView["status"] =
         ranked.length === 0 ? "empty" : r === undefined ? "unknown" : r === null ? "not-created" : r.hash === hash || preset?.syncedHash === hash ? "up-to-date" : "out-of-date";
+      const eligible = model.endpoints.filter((e) => isEligible(e, profile, desired, q.zdrOnly ?? false));
+      const cheapestEp = eligible.reduce<ClassifiedEndpoint | null>((best, e) => (!best || unitCost(e, profile.h, profile.r) < unitCost(best, profile.h, profile.r) ? e : best), null);
+      const cheapestCost = cheapestEp ? unitCost(cheapestEp, profile.h, profile.r) : null;
+      const shares = orderedShares(ranked);
+      const pinned = new Set(preset?.pinned ?? []);
+      const mode = settings.optimizer.routingPrice;
+      const toMoney = (perM: number | null, perDay: number) => (perM === null ? null : (perM * perDay * days) / 1_000_000);
+      const scenarios: PresetScenario[] = [
+        { name: DEFAULT_SCENARIO, tools: false },
+        ...settings.scenarios.profiles.map((p) => ({ name: p.name, tools: p.tools })),
+      ].map((sc) => {
+        const p = resolveProfile(input, settings, { ...q, scenario: sc.name });
+        return {
+          name: sc.name,
+          h: p.h,
+          r: p.r,
+          tools: p.tools,
+          inputPerDay: p.inputPerDay,
+          default: toMoney(pricePerMillion(model, current, p.h, p.r, p.tools, mode).price, p.inputPerDay),
+          preset: toMoney(orderedPrice(ranked, p.h, p.r), p.inputPerDay),
+        };
+      });
       return {
         model: model.slug,
         name: input.name,
+        openWeights: input.openWeights !== false,
         slug,
         presetId: `@preset/${slug}`,
         profile,
+        horizonDays: days,
         autoSync: preset?.autoSync ?? false,
         pinned: preset?.pinned ?? [],
         excluded: preset?.excluded ?? [],
-        ranked: ranked.map((e, i) => ({
-          rank: i + 1,
-          tag: e.tag,
-          provider: e.provider,
-          providerName: e.providerName,
-          quantization: e.quantization,
-          costPerM: unitCost(e, profile.h, profile.r),
-          uptime: e.uptime,
-          tps: e.tps,
-          overall: scores.get(e)!.overall,
-        })),
-        eligibleCount: model.endpoints.filter((e) => isEligible(e, profile, desired, q.zdrOnly ?? false)).length,
-        policy: { quantizations: config.provider.quantizations, zdr: ranked.length > 0 && ranked.every((e) => e.zdr), tools: profile.tools, fallbacks: true },
+        rankBy: settings.presets.rankBy,
+        ranked: ranked.map((e, i) => {
+          const costPerM = unitCost(e, profile.h, profile.r);
+          return {
+            rank: i + 1,
+            tag: e.tag,
+            provider: e.provider,
+            providerName: e.providerName,
+            quantization: e.quantization,
+            pIn: e.pIn,
+            pOut: e.pOut,
+            pCache: e.pCache,
+            cacheKnown: e.cacheKnown,
+            costPerM,
+            effectivePerM: effectivePerM(e, profile),
+            share: shares[i]!,
+            costHorizon: (shares[i]! * costPerM * profile.inputPerDay * days) / 1_000_000,
+            vsCheapest: cheapestCost && cheapestCost > 0 ? costPerM / cheapestCost - 1 : null,
+            uptime: e.uptime,
+            tps: e.tps,
+            overall: scores.get(e)!.overall,
+            pinned: pinned.has(e.tag),
+          };
+        }),
+        cheapest: cheapestEp && cheapestCost !== null ? { tag: cheapestEp.tag, providerName: cheapestEp.providerName, costPerM: cheapestCost } : null,
+        eligibleCount: eligible.length,
+        policy: {
+          quantizations: config.provider.quantizations ?? [],
+          minQuantization: model.openWeights !== false ? vs.filters.minQuantization : null,
+          zdr: ranked.length > 0 && ranked.every((e) => e.zdr),
+          tools: profile.tools,
+          fallbacks: true,
+        },
+        perM: {
+          default: pricePerMillion(model, current, profile.h, profile.r, profile.tools, mode).price,
+          preset: orderedPrice(ranked, profile.h, profile.r),
+        },
         cost: {
           default: money.default,
           preset: money.preset,
           saving: money.default !== null && money.preset !== null ? money.preset - money.default : null,
           savingPct: money.default && money.preset !== null ? (money.preset - money.default) / money.default : null,
         },
+        scenarios,
         config,
         hash,
         status,
@@ -641,6 +751,21 @@ export function buildPresets(ctx: Ctx, remote: ReadonlyMap<string, RemotePreset>
         syncedAt: preset?.syncedAt ?? null,
       };
     });
+}
+
+export function spendFor(ctx: Ctx, banned: ReadonlySet<string>): number | null {
+  const { snapshot, settings, q } = ctx;
+  const vs = viewSettings(settings, q);
+  const days = q.days ?? settings.scenarios.days;
+  let total = 0;
+  for (const input of snapshot.models) {
+    const m = classifyModel(input, vs);
+    const p = resolveProfile(input, settings, q);
+    const price = pricePerMillion(m, banned, p.h, p.r, p.tools, settings.optimizer.routingPrice).price;
+    if (price === null) return null;
+    total += (price * p.inputPerDay * days) / 1_000_000;
+  }
+  return total;
 }
 
 export type HistoryEntry = RunRecord & { added: string[]; removed: string[]; source: "manual" | "auto" | "rollback" };

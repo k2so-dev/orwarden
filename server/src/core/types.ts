@@ -22,6 +22,7 @@ export type ModelInput = {
   h: number;
   r: number;
   source: "usage" | "watchlist";
+  openWeights?: boolean;
   inputTokens: number;
   endpoints: Endpoint[];
 };
@@ -32,12 +33,15 @@ export type Snapshot = {
   skipped: string[];
 };
 
+export type Issue = { level: "bad" | "warn"; text: string };
+
 export type EndpointClass = "ok" | "outlier" | "hard-bad";
 
 export type ClassifiedEndpoint = Endpoint & {
   cls: EndpointClass;
-  quant: "ok" | "low" | "unknown";
+  quant: "ok" | "low" | "unknown" | "closed";
   reasons: string[];
+  issues: Issue[];
   cEff: number;
   score: number;
   weight: number;

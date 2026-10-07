@@ -4,7 +4,7 @@ import { z } from "zod";
 import { LoginLimiter, clientIp, endSession, passwordMatches, requireSession, sessionExpiry, startSession, type AuthOptions } from "./auth.ts";
 import { sendAlert } from "./core/alert.ts";
 import { HttpError } from "./core/openrouter.ts";
-import { buildOverview, buildProviders } from "./services/analysis.ts";
+import { buildOverview, buildProviders, spendFor } from "./services/analysis.ts";
 import { applyBans, banHistory, discardDrafts, rollback } from "./services/bans.ts";
 import { listPresets, syncPresets, updatePresetSettings } from "./services/presets.ts";
 import { refresh } from "./services/refresh.ts";
@@ -116,6 +116,7 @@ export function createApp(rt: Runtime) {
           expiresAt: snap?.key.expiresAt ?? rt.store.getValue<{ expiresAt: string | null }>("key_info")?.expiresAt ?? null,
         },
         workspace: snap?.workspace ?? null,
+        workspaces: snap?.workspaces ?? (snap ? [{ id: snap.workspace.id, name: snap.workspace.name }] : []),
         mode: settings.mode,
         refreshCron: settings.refreshCron,
         takenAt: snap?.takenAt ?? null,
@@ -150,7 +151,12 @@ export function createApp(rt: Runtime) {
       return c.json(ok);
     })
     .get("/settings", (c) => c.json(rt.settings()))
-    .put("/settings", zValidator("json", z.record(z.string(), z.unknown())), (c) => c.json(rt.updateSettings(c.req.valid("json"))))
+    .put("/settings", zValidator("json", z.record(z.string(), z.unknown())), (c) => {
+      const before = rt.settings().workspaceId;
+      const next = rt.updateSettings(c.req.valid("json"));
+      if (next.workspaceId !== before) rt.store.setValue("policies_imported", false);
+      return c.json(next);
+    })
     .post("/settings/reset", (c) => c.json(rt.resetSettings()))
     .post("/refresh", zValidator("json", z.object({ full: z.boolean().default(false) })), async (c) => {
       const full = c.req.valid("json").full;
@@ -209,10 +215,25 @@ export function createApp(rt: Runtime) {
         return c.json({ provider: slug, policy });
       },
     )
-    .post("/bans/apply", zValidator("json", z.object({ force: z.boolean().default(false), dryRun: z.boolean().default(false) })), async (c) => {
-      const { force, dryRun } = c.req.valid("json");
-      return c.json(await rt.exclusive(() => applyBans(rt, { force, dryRun })));
-    })
+    .post(
+      "/bans/apply",
+      zValidator("json", z.object({ force: z.boolean().default(false), dryRun: z.boolean().default(false), view: ViewQuerySchema.optional() })),
+      async (c) => {
+        const { force, dryRun, view } = c.req.valid("json");
+        const result = await rt.exclusive(() => applyBans(rt, { force, dryRun }));
+        const ctx = {
+          snapshot: rt.requireSnapshot(),
+          settings: rt.settings(),
+          q: view ?? { scenario: "actual" },
+          bans: rt.banInputs(),
+          presets: rt.store.presetSettings(),
+        };
+        return c.json({
+          ...result,
+          cost: { before: spendFor(ctx, new Set(result.before)), after: spendFor(ctx, new Set(result.after)), days: view?.days ?? ctx.settings.scenarios.days },
+        });
+      },
+    )
     .post("/bans/discard", (c) => c.json(discardDrafts(rt)))
     .get("/bans/history", zValidator("query", z.object({ limit: z.coerce.number().int().min(1).max(500).default(50) })), (c) =>
       c.json(banHistory(rt, c.req.valid("query").limit)),
