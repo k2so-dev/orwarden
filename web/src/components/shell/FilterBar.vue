@@ -122,8 +122,7 @@ const previewModel = computed(() => overview.value?.models[0]?.name ?? "");
     </div>
     <div class="ml-auto">
       <Popover>
-        <PopoverTrigger as-child>
-          <button type="button" class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-background px-3 text-[13px] font-medium hover:bg-accent">
+        <PopoverTrigger class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-background px-3 text-[13px] font-medium hover:bg-accent">
             <svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
               <path d="M20 7h-9"></path>
               <path d="M14 17H5"></path>
@@ -132,8 +131,7 @@ const previewModel = computed(() => overview.value?.models[0]?.name ?? "");
             </svg>
             Weights
             <span class="tnum text-xs text-muted-foreground">{{ weightsLabel }}</span>
-          </button>
-        </PopoverTrigger>
+          </PopoverTrigger>
         <PopoverContent align="end" class="flex w-[340px] flex-col gap-3 rounded-[10px] p-3.5">
           <div class="flex items-center justify-between">
             <span class="text-[13px] font-semibold">Efficiency weights</span>

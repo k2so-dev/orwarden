@@ -284,9 +284,10 @@ const SCEN_GRID = "grid grid-cols-[minmax(0,1fr)_80px_88px_56px_92px] items-cent
           v-else
           type="button"
           :disabled="busy"
-          :class="cn('h-[30px] rounded-lg px-3 text-[12.5px] font-medium disabled:opacity-50', status === 'up-to-date' && !dryRun ? 'border border-border bg-background' : 'bg-primary text-primary-foreground')"
+          :class="cn('inline-flex h-[30px] items-center gap-1.5 rounded-lg px-3 text-[12.5px] font-medium disabled:cursor-wait disabled:opacity-70', status === 'up-to-date' && !dryRun ? 'border border-border bg-background' : 'bg-primary text-primary-foreground')"
           @click="sync"
         >
+          <svg v-if="busy" class="size-[13px] animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
           {{ actionLabel }}
         </button>
       </div>

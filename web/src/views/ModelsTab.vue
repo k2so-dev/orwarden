@@ -9,6 +9,7 @@ import Tip from "@/components/app/Tip.vue";
 import ModelSection from "@/components/models/ModelSection.vue";
 import { filters, scenarioLabel } from "@/stores/filters";
 import { act, overview, providers, refreshNow, settings } from "@/stores/data";
+import { notify } from "@/stores/toast";
 
 const models = computed(() => overview.value?.models ?? []);
 const summary = computed(() => overview.value?.summary ?? null);
@@ -42,19 +43,23 @@ function removeModel(slug: string) {
   void save({ watchlist: s.watchlist.filter((w) => w.slug !== slug), excludedModels: [...new Set([...s.excludedModels, slug])] });
 }
 
-function addModel(slug: string) {
+async function addModel(slug: string) {
   const s = settings.value;
   if (!s) return;
-  void save({
+  await save({
     watchlist: s.watchlist.some((w) => w.slug === slug) ? s.watchlist : [...s.watchlist, { slug, weightUsd: 0 }],
     excludedModels: s.excludedModels.filter((m) => m !== slug),
   });
+  if (selected.value.has(slug) || !settings.value) return;
+  notify("Model not added", `OpenRouter lists no endpoints for ${slug}`, "err");
+  const res = await act(() => unwrap(client.settings.$put({ json: { watchlist: settings.value!.watchlist.filter((w) => w.slug !== slug) } })));
+  if (res) settings.value = res;
 }
 
 function pick(slug: string) {
   pickerOpen.value = false;
   if (selected.value.has(slug)) removeModel(slug);
-  else addModel(slug);
+  else void addModel(slug);
 }
 
 const pickerOpen = ref(false);
@@ -92,12 +97,10 @@ const cardSub = "text-pretty text-[12.5px] text-muted-foreground";
         </button>
       </span>
       <Popover v-model:open="pickerOpen">
-        <PopoverTrigger as-child>
-          <button type="button" class="inline-flex h-7 items-center gap-1.5 rounded-full border border-dashed border-border px-2.5 text-[12.5px] font-medium hover:bg-accent">
+        <PopoverTrigger class="inline-flex h-7 items-center gap-1.5 rounded-full border border-dashed border-border px-2.5 text-[12.5px] font-medium hover:bg-accent">
             <svg class="size-[13px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M12 5v14"></path></svg>
             Add model
-          </button>
-        </PopoverTrigger>
+          </PopoverTrigger>
         <PopoverContent align="start" class="w-[380px] overflow-hidden p-0">
           <div class="flex items-center gap-2 border-b border-border px-3">
             <svg class="size-3.5 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>

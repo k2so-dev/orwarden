@@ -56,8 +56,8 @@ async function syncAll() {
           <span class="text-muted-foreground">Each preset keeps the top {{ topN }} {{ filters.minQuant }}+ endpoints, ordered {{ order }}.</span>
         </div>
       </div>
-      <button type="button" :disabled="busy" class="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-[13px] font-medium text-primary-foreground disabled:opacity-50" @click="syncAll">
-        <svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path><path d="M21 3v5h-5"></path></svg>
+      <button type="button" :disabled="busy" class="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-[13px] font-medium text-primary-foreground disabled:cursor-wait disabled:opacity-70" @click="syncAll">
+        <svg :class="['size-3.5', busy && 'animate-spin']" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path><path d="M21 3v5h-5"></path></svg>
         {{ dryRun ? "Preview all" : "Sync all presets" }}
       </button>
     </div>

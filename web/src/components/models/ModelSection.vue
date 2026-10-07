@@ -92,15 +92,13 @@ const densityModel = computed({
           Endpoints <span class="font-normal text-muted-foreground">· dimmed rows fail quality filters · hover a badge for the reason</span>
         </span>
         <Popover>
-          <PopoverTrigger as-child>
-            <button type="button" class="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 text-[12.5px] font-medium hover:bg-accent">
+          <PopoverTrigger class="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 text-[12.5px] font-medium hover:bg-accent">
               <svg class="size-[13px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect width="18" height="18" x="3" y="3" rx="2"></rect>
                 <path d="M9 3v18M15 3v18"></path>
               </svg>
               Columns
-            </button>
-          </PopoverTrigger>
+            </PopoverTrigger>
           <PopoverContent align="end" class="w-[220px] rounded-[10px] p-1.5">
             <div class="px-2 py-1 text-[11.5px] font-medium text-muted-foreground">Toggle columns</div>
             <button
