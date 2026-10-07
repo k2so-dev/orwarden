@@ -171,7 +171,8 @@ export function createApp(rt: Runtime) {
       return c.json(
         rt
           .requireSnapshot()
-          .catalog.filter((m) => !needle || m.id.toLowerCase().includes(needle) || m.name.toLowerCase().includes(needle))
+          .catalog.filter((m) => !m.id.startsWith("~"))
+          .filter((m) => !needle || m.id.toLowerCase().includes(needle) || m.name.toLowerCase().includes(needle))
           .map((m) => ({ ...m, tracked: tracked.has(m.id), watched: watch.has(m.id), usageUsd: usage.get(m.id) ?? 0 }))
           .sort((a, b) => b.usageUsd - a.usageUsd)
           .slice(0, limit),
