@@ -7,7 +7,7 @@ import { HttpError, type OpenRouterApi } from "../core/openrouter.ts";
 import { banSaving, optimize } from "../core/optimizer.ts";
 import { preflight } from "../core/preflight.ts";
 import type { Decision } from "../db.ts";
-import { allowedProviders, fixedBans, type AppSnapshot } from "./analysis.ts";
+import { allowedProviders, fixedBans, resolveQuery, type AppSnapshot } from "./analysis.ts";
 import { applyBans, releaseAuto, sorted, type ApplyResult } from "./bans.ts";
 import { syncPresets, type SyncResult } from "./presets.ts";
 import type { Runtime } from "./state.ts";
@@ -144,7 +144,7 @@ export async function refresh(rt: Runtime, scheduled = false): Promise<RefreshRe
       if (settings.mode === "apply") {
         applied = await applyBans(rt, { kind: "scheduled", force: true, decisions });
       }
-      presets = await syncPresets(rt, "auto", { scenario: settings.presets.defaultScenario }, settings.mode === "dry-run");
+      presets = await syncPresets(rt, "auto", resolveQuery(settings), settings.mode === "dry-run");
     }
     if (!applied) {
       const current = sorted((snapshot.guardrail.ignored_providers ?? []).map((p) => p.toLowerCase()));

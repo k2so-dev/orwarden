@@ -130,6 +130,21 @@ export function viewSettings(settings: Settings, q: ViewQuery): Settings {
   };
 }
 
+export function savedQuery(settings: Settings): ViewQuery {
+  const w = settings.workload;
+  const custom = w.mode === "custom";
+  return {
+    scenario: custom ? "custom" : DEFAULT_SCENARIO,
+    ...(custom ? { h: w.h, r: w.r, tokensPerDay: w.tokensPerDay } : {}),
+    tools: settings.filters.requireTools,
+  };
+}
+
+export function resolveQuery(settings: Settings, raw: Partial<ViewQuery> = {}): ViewQuery {
+  const defined = Object.fromEntries(Object.entries(raw).filter(([, v]) => v !== undefined));
+  return { ...savedQuery(settings), ...defined };
+}
+
 export function hasPreset(input: Pick<ModelInput, "endpoints">): boolean {
   return new Set(input.endpoints.map((e) => e.provider)).size > 1;
 }
@@ -238,6 +253,11 @@ export function rankForPreset(
 ): ClassifiedEndpoint[] {
   const excluded = new Set(preset?.excluded ?? []);
   const eligible = model.endpoints.filter((e) => isEligible(e, profile, banned, zdrOnly) && !excluded.has(e.tag));
+  const byScore = (a: ClassifiedEndpoint, b: ClassifiedEndpoint) => scores.get(b)!.overall - scores.get(a)!.overall || a.tag.localeCompare(b.tag);
+  if (preset?.picked) {
+    const picked = new Set(preset.picked);
+    return eligible.filter((e) => picked.has(e.tag)).sort(byScore);
+  }
   const pinned = (preset?.pinned ?? []).map((t) => eligible.find((e) => e.tag === t)).filter((e): e is ClassifiedEndpoint => Boolean(e));
   const rest = eligible
     .filter((e) => !pinned.includes(e))
@@ -458,10 +478,9 @@ function viewBasis(ctx: Ctx): Basis {
 
 export function presetBasis(ctx: Ctx, model: string): Basis {
   const { settings } = ctx;
-  const scenario = ctx.presets.get(model)?.scenario ?? settings.presets.defaultScenario;
   return {
     settings,
-    q: { scenario },
+    q: savedQuery(settings),
     zdrOnly: settings.filters.zdrOnly,
     weights: { ...settings.scoring },
   };
@@ -779,6 +798,7 @@ export type PresetEndpoint = {
   tps: number | null;
   overall: number;
   pinned: boolean;
+  picked: boolean;
 };
 
 export type PresetScenario = { name: string; h: number; r: number; tools: boolean; inputPerDay: number; default: number | null; preset: number | null };
@@ -794,6 +814,7 @@ export type PresetView = {
   autoSync: boolean;
   pinned: string[];
   excluded: string[];
+  picked: string[] | null;
   rankBy: Settings["presets"]["rankBy"];
   ranked: PresetEndpoint[];
   cheapest: { tag: string; providerName: string; costPerM: number } | null;
@@ -874,6 +895,7 @@ export function buildPresets(ctx: Ctx, remote: ReadonlyMap<string, RemotePreset>
         autoSync: preset?.autoSync ?? false,
         pinned: preset?.pinned ?? [],
         excluded: preset?.excluded ?? [],
+        picked: preset?.picked ?? null,
         rankBy: settings.presets.rankBy,
         ranked: ranked.map((e, i) => {
           const costPerM = unitCost(e, profile.h, profile.r);
@@ -896,6 +918,7 @@ export function buildPresets(ctx: Ctx, remote: ReadonlyMap<string, RemotePreset>
             tps: e.tps,
             overall: scores.get(e)!.overall,
             pinned: pinned.has(e.tag),
+            picked: preset?.picked?.includes(e.tag) ?? false,
           };
         }),
         cheapest: cheapestEp && cheapestCost !== null ? { tag: cheapestEp.tag, providerName: cheapestEp.providerName, costPerM: cheapestCost } : null,

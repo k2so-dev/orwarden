@@ -54,7 +54,7 @@ export async function listPresets(rt: Runtime, q: ViewQuery, fresh = false): Pro
 }
 
 export function defaultPresetSettings(model: string): PresetSettings {
-  return { model, slug: null, autoSync: false, scenario: null, pinned: [], excluded: [], syncedHash: null, syncedAt: null };
+  return { model, slug: null, autoSync: false, pinned: [], excluded: [], picked: null, syncedHash: null, syncedAt: null };
 }
 
 export function updatePresetSettings(rt: Runtime, model: string, patch: Partial<Omit<PresetSettings, "model" | "syncedHash" | "syncedAt">>): PresetSettings {

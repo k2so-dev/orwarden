@@ -18,6 +18,12 @@ export const SettingsSchema = z.object({
   refreshCron: z.string().min(9).max(100),
   usageWindowDays: z.number().int().min(1).max(30),
   defaultProfile: z.object({ h: ratio, r: z.number().min(0).max(50) }),
+  workload: z.object({
+    mode: z.enum(["actual", "custom"]),
+    h: ratio,
+    r: z.number().min(0).max(50),
+    tokensPerDay: z.number().min(0),
+  }),
   watchlist: z.array(z.object({ slug: z.string().min(3), weightUsd: z.number().min(0) })),
   excludedModels: z.array(z.string()),
   filters: z.object({
@@ -25,6 +31,7 @@ export const SettingsSchema = z.object({
     nativeQuantization: z.record(z.string(), z.string()),
     banLowQuantProviders: z.boolean(),
     zdrOnly: z.boolean(),
+    requireTools: z.boolean(),
     minUptime: ratio,
     minTps: z.number().min(0),
     slowPenalty: z.number().min(1),
@@ -71,6 +78,7 @@ export const DEFAULT_SETTINGS: Settings = {
   refreshCron: "0 * * * *",
   usageWindowDays: 7,
   defaultProfile: { h: 0.5, r: 0.2 },
+  workload: { mode: "actual", h: 0.5, r: 0.3, tokensPerDay: 1_000_000 },
   watchlist: [],
   excludedModels: [],
   filters: {
@@ -78,6 +86,7 @@ export const DEFAULT_SETTINGS: Settings = {
     nativeQuantization: { "openai/gpt-oss": "fp4" },
     banLowQuantProviders: true,
     zdrOnly: false,
+    requireTools: false,
     minUptime: 0.97,
     minTps: 0,
     slowPenalty: 1.2,
@@ -124,4 +133,22 @@ export function deepMerge<T>(base: T, patch: unknown): T {
 
 export function mergeSettings(base: Settings, patch: unknown): Settings {
   return SettingsSchema.parse(deepMerge(base, patch));
+}
+
+export function migrateSettings(raw: unknown): unknown {
+  if (!isPlain(raw) || raw.workload !== undefined) return raw;
+  const presets = isPlain(raw.presets) ? raw.presets : {};
+  const name = presets.defaultScenario;
+  if (typeof name !== "string" || name === "actual") return raw;
+  const scenarios = isPlain(raw.scenarios) ? raw.scenarios : {};
+  const profiles = Array.isArray(scenarios.profiles) ? scenarios.profiles : DEFAULT_SETTINGS.scenarios.profiles;
+  const named = profiles.find((p): p is Scenario => isPlain(p) && p.name === name);
+  if (!named) return raw;
+  const filters = isPlain(raw.filters) ? raw.filters : {};
+  const perDay = typeof scenarios.inputTokensPerDay === "number" ? scenarios.inputTokensPerDay : DEFAULT_SETTINGS.scenarios.inputTokensPerDay;
+  return {
+    ...raw,
+    workload: { mode: "custom", h: named.h, r: named.r, tokensPerDay: perDay },
+    filters: { ...filters, requireTools: named.tools },
+  };
 }

@@ -1,7 +1,7 @@
 import { createClient, type OpenRouterApi } from "../core/openrouter.ts";
 import type { Store } from "../db.ts";
 import type { Env } from "../env.ts";
-import { DEFAULT_SETTINGS, PRESET_SLUG_RE, mergeSettings, type Settings } from "../settings.ts";
+import { DEFAULT_SETTINGS, PRESET_SLUG_RE, mergeSettings, migrateSettings, type Settings } from "../settings.ts";
 import type { Vault } from "../vault.ts";
 import type { AppSnapshot, BanInputs } from "./analysis.ts";
 
@@ -53,7 +53,7 @@ export class Runtime {
   }
 
   settings(): Settings {
-    this.cachedSettings ??= mergeSettings(this.baseSettings(), this.store.getValue("settings") ?? {});
+    this.cachedSettings ??= mergeSettings(this.baseSettings(), migrateSettings(this.store.getValue("settings") ?? {}));
     return this.cachedSettings;
   }
 

@@ -198,6 +198,47 @@ describe("api flow", () => {
     expect(ctx.mock.calls.presets[0]!.config).toEqual(base.config);
   });
 
+  test("presets and views follow the saved workload and filters", async () => {
+    await ctx.call("/api/refresh", { method: "POST", body: {} });
+    const base = (await ctx.call("/api/presets")).body.find((x: any) => x.model === DEEPSEEK);
+    expect(base.profile.name).toBe("actual");
+    expect(base.config.provider.require_parameters).toBeUndefined();
+    await ctx.call("/api/settings", {
+      method: "PUT",
+      body: { workload: { mode: "custom", h: 0.2, r: 1, tokensPerDay: 5_000_000 }, filters: { requireTools: true } },
+    });
+    const next = (await ctx.call("/api/presets")).body.find((x: any) => x.model === DEEPSEEK);
+    expect(next.profile).toMatchObject({ name: "custom", h: 0.2, r: 1, tools: true, inputPerDay: 5_000_000 });
+    expect(next.config.provider.require_parameters).toBe(true);
+    expect(next.hash).not.toBe(base.hash);
+    const overview = (await ctx.call("/api/overview")).body.models.find((x: any) => x.slug === DEEPSEEK);
+    expect(overview.profile).toMatchObject({ name: "custom", h: 0.2, r: 1, tools: true });
+    await ctx.call("/api/presets/sync", { method: "POST", body: { models: [DEEPSEEK] } });
+    expect(ctx.mock.calls.presets[0]!.config).toEqual(next.config);
+  });
+
+  test("a legacy default scenario becomes the saved workload", async () => {
+    ctx.store.setValue("settings", { presets: { defaultScenario: "agent" } });
+    const s = new Runtime({ env, store: ctx.store, vault: ctx.rt.vault, clientFactory: () => ctx.mock.client, now: NOW }).settings();
+    expect(s.workload).toMatchObject({ mode: "custom", h: 0.8, r: 0.05 });
+    expect(s.filters.requireTools).toBe(true);
+  });
+
+  test("a hand-picked preset contains exactly the picked endpoints", async () => {
+    await ctx.call("/api/refresh", { method: "POST", body: {} });
+    const base = (await ctx.call("/api/presets")).body.find((x: any) => x.model === DEEPSEEK);
+    expect(base.picked).toBeNull();
+    const tag = base.ranked[base.ranked.length - 1].tag;
+    await ctx.call("/api/presets/settings", { method: "PUT", body: { model: DEEPSEEK, picked: [tag] } });
+    const picked = (await ctx.call("/api/presets")).body.find((x: any) => x.model === DEEPSEEK);
+    expect(picked.picked).toEqual([tag]);
+    expect(picked.ranked.map((e: any) => e.tag)).toEqual([tag]);
+    expect(picked.ranked[0].picked).toBe(true);
+    await ctx.call("/api/presets/settings", { method: "PUT", body: { model: DEEPSEEK, picked: null } });
+    const reset = (await ctx.call("/api/presets")).body.find((x: any) => x.model === DEEPSEEK);
+    expect(reset.hash).toBe(base.hash);
+  });
+
   test("preset status follows the remote config", async () => {
     await ctx.call("/api/refresh", { method: "POST", body: {} });
     await ctx.call("/api/presets/sync", { method: "POST", body: { models: [DEEPSEEK] } });
@@ -224,7 +265,7 @@ describe("api flow", () => {
   });
 
   test("slugs of untracked models stay reserved and own slugs stay editable", async () => {
-    ctx.store.savePresetSettings({ model: "gone/model", slug: "foo-safe", autoSync: false, scenario: null, pinned: [], excluded: [], syncedHash: null, syncedAt: null });
+    ctx.store.savePresetSettings({ model: "gone/model", slug: "foo-safe", autoSync: false, pinned: [], excluded: [], picked: null, syncedHash: null, syncedAt: null });
     const clash = await ctx.call("/api/presets/settings", { method: "PUT", body: { model: DEEPSEEK, slug: "foo-safe" } });
     expect(clash.status).toBe(409);
     const own = await ctx.call("/api/presets/settings", { method: "PUT", body: { model: "gone/model", autoSync: true } });

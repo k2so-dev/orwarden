@@ -25,9 +25,9 @@ export type PresetSettings = {
   model: string;
   slug: string | null;
   autoSync: boolean;
-  scenario: string | null;
   pinned: string[];
   excluded: string[];
+  picked: string[] | null;
   syncedHash: string | null;
   syncedAt: string | null;
 };
@@ -116,12 +116,14 @@ type PresetRow = {
   synced_at: string | null;
 };
 
+const PICKED = "picked";
+
 const toPreset = (r: PresetRow): PresetSettings => ({
   model: r.model,
   slug: r.slug,
   autoSync: r.auto_sync === 1,
-  scenario: r.scenario,
-  pinned: JSON.parse(r.pinned),
+  pinned: r.scenario === PICKED ? [] : JSON.parse(r.pinned),
+  picked: r.scenario === PICKED ? JSON.parse(r.pinned) : null,
   excluded: JSON.parse(r.excluded),
   syncedHash: r.synced_hash,
   syncedAt: r.synced_at,
@@ -308,8 +310,8 @@ export class Store {
         model: p.model,
         slug: p.slug,
         autoSync: p.autoSync ? 1 : 0,
-        scenario: p.scenario,
-        pinned: JSON.stringify(p.pinned),
+        scenario: p.picked ? PICKED : null,
+        pinned: JSON.stringify(p.picked ?? p.pinned),
         excluded: JSON.stringify(p.excluded),
         syncedHash: p.syncedHash,
         syncedAt: p.syncedAt,

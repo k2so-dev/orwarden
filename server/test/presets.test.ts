@@ -17,14 +17,14 @@ describe("preset slugs", () => {
   });
 
   test("keep the slug of a synced preset when a collision appears later", () => {
-    const synced = { model: "a/llama", slug: null, autoSync: false, scenario: null, pinned: [], excluded: [], syncedHash: "h", syncedAt: "2026-10-01T00:00:00Z" };
+    const synced = { model: "a/llama", slug: null, autoSync: false, pinned: [], excluded: [], picked: null, syncedHash: "h", syncedAt: "2026-10-01T00:00:00Z" };
     const slugs = presetSlugs(["a/llama", "b/llama"], testConfig(), new Map([["a/llama", synced]]));
     expect(slugs.get("a/llama")).toBe("llama-safe");
     expect(slugs.get("b/llama")).toBe("b-llama-safe");
   });
 
   test("legacy synced presets with the same short name stay unique", () => {
-    const legacy = (m: string) => ({ model: m, slug: null, autoSync: false, scenario: null, pinned: [], excluded: [], syncedHash: "h", syncedAt: "2026-10-01T00:00:00Z" });
+    const legacy = (m: string) => ({ model: m, slug: null, autoSync: false, pinned: [], excluded: [], picked: null, syncedHash: "h", syncedAt: "2026-10-01T00:00:00Z" });
     const slugs = presetSlugs(["a/foo", "b/foo"], testConfig(), new Map([["a/foo", legacy("a/foo")], ["b/foo", legacy("b/foo")]]));
     expect(slugs.get("a/foo")).toBe("foo-safe");
     expect(slugs.get("b/foo")).toBe("b-foo-safe");
@@ -53,7 +53,7 @@ describe("preset slugs", () => {
   });
 
   test("avoid a custom slug taken by another model", () => {
-    const custom = { model: "x/other", slug: "llama-safe", autoSync: false, scenario: null, pinned: [], excluded: [], syncedHash: null, syncedAt: null };
+    const custom = { model: "x/other", slug: "llama-safe", autoSync: false, pinned: [], excluded: [], picked: null, syncedHash: null, syncedAt: null };
     const slugs = presetSlugs(["a/llama", "x/other"], testConfig(), new Map([["x/other", custom]]));
     expect(slugs.get("a/llama")).toBe("a-llama-safe");
     expect(slugs.get("x/other")).toBe("llama-safe");

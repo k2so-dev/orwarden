@@ -5,7 +5,7 @@ import { z } from "zod";
 import { LoginLimiter, clientIp, endSession, passwordMatches, requireSession, sessionExpiry, startSession, type AuthOptions } from "./auth.ts";
 import { sendAlert } from "./core/alert.ts";
 import { HttpError } from "./core/openrouter.ts";
-import { buildOverview, buildProviders, spendChange } from "./services/analysis.ts";
+import { buildOverview, buildProviders, resolveQuery, spendChange } from "./services/analysis.ts";
 import { applyBans, banHistory, discardDrafts, rollback } from "./services/bans.ts";
 import { listPresets, pinLegacySlugs, syncPresets, updatePresetSettings } from "./services/presets.ts";
 import { refresh } from "./services/refresh.ts";
@@ -16,7 +16,7 @@ const bool = z.enum(["true", "false"]).transform((v) => v === "true");
 const num = (min: number, max: number) => z.coerce.number().min(min).max(max);
 
 export const ViewQuerySchema = z.object({
-  scenario: z.string().max(40).default("actual"),
+  scenario: z.string().max(40).optional(),
   h: num(0, 1).optional(),
   r: num(0, 50).optional(),
   tools: bool.optional(),
@@ -37,7 +37,7 @@ const PresetSettingsBody = z.object({
   model: z.string().min(3),
   slug: PresetSlug.nullable().optional(),
   autoSync: z.boolean().optional(),
-  scenario: z.string().max(40).nullable().optional(),
+  picked: z.array(z.string()).max(20).nullable().optional(),
   pinned: z.array(z.string()).max(20).optional(),
   excluded: z.array(z.string()).max(100).optional(),
 });
@@ -187,7 +187,7 @@ export function createApp(rt: Runtime) {
         buildOverview({
           snapshot: rt.requireSnapshot(),
           settings: rt.settings(),
-          q: c.req.valid("query"),
+          q: resolveQuery(rt.settings(), c.req.valid("query")),
           bans: rt.banInputs(),
           presets: rt.store.presetSettings(),
         }),
@@ -203,7 +203,7 @@ export function createApp(rt: Runtime) {
         buildProviders({
           snapshot: rt.requireSnapshot(),
           settings: rt.settings(),
-          q: c.req.valid("query"),
+          q: resolveQuery(rt.settings(), c.req.valid("query")),
           bans: rt.banInputs(),
           presets: rt.store.presetSettings(),
         }),
@@ -229,7 +229,7 @@ export function createApp(rt: Runtime) {
         const ctx = {
           snapshot: rt.requireSnapshot(),
           settings: rt.settings(),
-          q: view ?? { scenario: "actual" },
+          q: resolveQuery(rt.settings(), view),
           bans: rt.banInputs(),
           presets: rt.store.presetSettings(),
         };
@@ -249,7 +249,7 @@ export function createApp(rt: Runtime) {
     })
     .get("/presets", zValidator("query", ViewQuerySchema.extend({ fresh: bool.optional() })), async (c) => {
       const { fresh, ...q } = c.req.valid("query");
-      return c.json(await listPresets(rt, q, fresh ?? false));
+      return c.json(await listPresets(rt, resolveQuery(rt.settings(), q), fresh ?? false));
     })
     .put("/presets/settings", zValidator("json", PresetSettingsBody), (c) => {
       const { model, ...patch } = c.req.valid("json");
@@ -257,7 +257,7 @@ export function createApp(rt: Runtime) {
     })
     .post("/presets/sync", zValidator("json", z.object({ models: z.array(z.string().min(3)).min(1).max(50), dryRun: z.boolean().default(false), accept: z.array(z.enum(["unknown", "foreign", "edits"])).default([]), slugs: z.record(z.string(), z.string()).default({}) })), async (c) => {
       const { models, dryRun, accept, slugs } = c.req.valid("json");
-      return c.json(await rt.exclusive(() => syncPresets(rt, models, { scenario: rt.settings().presets.defaultScenario }, dryRun, accept, slugs)));
+      return c.json(await rt.exclusive(() => syncPresets(rt, models, resolveQuery(rt.settings()), dryRun, accept, slugs)));
     })
     .post("/alerts/test", async (c) => {
       const alerts = rt.settings().alerts;
