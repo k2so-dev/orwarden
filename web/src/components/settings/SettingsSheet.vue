@@ -1,5 +1,6 @@
 <script setup lang="ts" vapor>
 import { computed, reactive, ref, watch } from "vue";
+import SelectBox from "@/components/app/SelectBox.vue";
 import Segmented from "@/components/app/Segmented.vue";
 import StatusBadge from "@/components/app/StatusBadge.vue";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -54,6 +55,10 @@ watch(settingsOpen, (open) => {
 });
 
 const s = computed(() => draft.value);
+
+function setWorkspace(id: string) {
+  if (draft.value) draft.value.workspaceId = id;
+}
 const interval = computed({
   get: () => s.value?.refreshCron ?? "",
   set: (v: string) => {
@@ -80,6 +85,9 @@ const scenarioOptions = computed(() => {
   const saved = s.value?.presets.defaultScenario;
   return saved && !names.includes(saved) ? [...names, saved] : names;
 });
+const scenarioSelect = computed(() => scenarioOptions.value.map((name) => ({ value: name, label: missingScenario(name) ? `${name} (deleted, ranks as actual)` : scenarioLabel(name) })));
+const quantOptions = QUANT_OPTIONS.map((q) => ({ value: q.value, label: q.value }));
+const workspaceOptions = computed(() => workspaces.value.map((w) => ({ value: w.id, label: w.name })));
 const missingScenario = (name: string) => !!s.value && name !== "actual" && !s.value.scenarios.profiles.some((p) => p.name === name);
 const keyLabel = computed(() => status.value?.key.label ?? (status.value?.key.source === "env" ? "set from environment" : "not set"));
 
@@ -207,9 +215,7 @@ const btn = "h-8 rounded-lg border border-border bg-background px-3 text-[13px] 
             <div class="font-medium">Workspace</div>
             <div class="text-xs text-muted-foreground">Guardrail and usage come from this workspace</div>
           </div>
-          <select :value="currentWorkspace" :class="[input, 'w-[200px]']" @change="s.workspaceId = ($event.target as HTMLSelectElement).value">
-            <option v-for="w in workspaces" :key="w.id" :value="w.id">{{ w.name }}</option>
-          </select>
+          <SelectBox :model-value="currentWorkspace" :options="workspaceOptions" class="w-[200px]" @update:model-value="setWorkspace" />
         </div>
         <div :class="row">
           <span class="font-medium">Key expiry</span>
@@ -228,9 +234,7 @@ const btn = "h-8 rounded-lg border border-border bg-background px-3 text-[13px] 
         <div :class="section">Quality rules</div>
         <div :class="row">
           <span class="font-medium">Min quantization</span>
-          <select v-model="s.filters.minQuantization" :class="[input, 'w-[100px]']">
-            <option v-for="q in QUANT_OPTIONS" :key="q.value" :value="q.value">{{ q.value }}</option>
-          </select>
+          <SelectBox v-model="s.filters.minQuantization" :options="quantOptions" class="w-[100px]" />
         <div class="col-span-2 flex flex-col gap-2">
           <div>
             <div class="font-medium">Native quantization exceptions</div>
@@ -317,9 +321,7 @@ const btn = "h-8 rounded-lg border border-border bg-background px-3 text-[13px] 
             <div class="font-medium">Workload</div>
             <div class="text-xs text-muted-foreground">traffic profile used to rank presets</div>
           </div>
-          <select v-model="s.presets.defaultScenario" :class="[input, 'w-[180px]']">
-            <option v-for="name in scenarioOptions" :key="name" :value="name">{{ missingScenario(name) ? `${name} (deleted, ranks as actual)` : scenarioLabel(name) }}</option>
-          </select>
+          <SelectBox v-model="s.presets.defaultScenario" :options="scenarioSelect" class="w-[180px]" />
           <div>
             <div class="font-medium">Naming pattern</div>
             <div class="text-xs text-muted-foreground">ids of presets synced from here never change; all others follow the new pattern</div>
