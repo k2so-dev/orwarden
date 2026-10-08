@@ -53,7 +53,7 @@ const keyPill = computed(() => {
       return { dot: "bg-bad", label: "Invalid key", sub: "401 from OpenRouter" };
     default: {
       const exp = s.key.expiresAt;
-      return { dot: "bg-ok", label: "Connected", sub: exp ? `expires ${inDays(exp)}` : "no expiry" };
+      return { dot: "bg-ok", label: "Connected", sub: exp ? `expires ${inDays(exp, clock.value.getTime())}` : "no expiry" };
     }
   }
 });

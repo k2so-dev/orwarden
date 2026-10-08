@@ -16,7 +16,7 @@ const effect = computed(() => {
   const p = props.plan;
   if (!p) return "";
   const c = p.cost;
-  const money = c.after === null || c.before === null ? "—" : signedMoney(c.after - c.before);
+  const money = c.blocked ? "leaves a model with no provider" : signedMoney(c.after - c.before);
   return `${p.added.length} added · ${p.removed.length} removed · ${money} / ${periodLabel(c.days)} across selected models (${scenarioLabel(filters.value.scenario).toLowerCase()})`;
 });
 

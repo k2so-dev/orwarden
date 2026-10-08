@@ -70,7 +70,7 @@ function tipScore(e: Event) {
   const f = filters.value;
   const total = f.wPrice + f.wSpeed + f.wReliability || 1;
   const weighted = (s.price * f.wPrice + s.speed * f.wSpeed + s.reliability * f.wReliability) / total;
-  const penalty = props.row.quant === "unknown" ? (settings.value?.scoring.unknownQuantPenalty ?? 0) : 0;
+  const penalty = props.row.quant === "unknown" ? Math.max(0, Math.round(weighted - s.overall)) : 0;
   const lines: TipLine[] = [
     {
       text: `(Price ${Math.round(s.price)} × ${f.wPrice} + Speed ${Math.round(s.speed)} × ${f.wSpeed} + Reliability ${Math.round(s.reliability)} × ${f.wReliability}) / ${total} = ${weighted.toFixed(1)}`,
@@ -78,7 +78,7 @@ function tipScore(e: Event) {
     },
   ];
   if (penalty > 0) lines.push({ text: `− ${penalty} for undisclosed quantization = ${Math.round(s.overall)}`, tone: "fg" });
-  if (props.row.tps === null || props.row.latencyMs === null) lines.push({ text: "Speed uses a 30% placeholder where throughput or latency is unknown.", tone: "muted" });
+  if (!props.row.tps || !props.row.latencyMs || props.row.latencyMs <= 0) lines.push({ text: "Speed uses a 30% placeholder where throughput or latency is unknown.", tone: "muted" });
   showTip(e, "Overall score", lines);
 }
 

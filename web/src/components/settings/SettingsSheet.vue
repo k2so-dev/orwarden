@@ -10,7 +10,7 @@ import { act, loadAll, refreshNow, reloadAfterWrite, settings, status } from "@/
 import { notify } from "@/stores/toast";
 import { QUANT_OPTIONS, scenarioLabel } from "@/stores/filters";
 import { confirmAction, confirmRequest } from "@/stores/confirm";
-import { settingsOpen } from "@/stores/ui";
+import { clock, settingsOpen } from "@/stores/ui";
 import Toggle from "@/components/app/Toggle.vue";
 
 const INTERVALS = [
@@ -76,7 +76,7 @@ const intervalOptions = computed(() =>
 const exceptions = computed(() => Object.entries(s.value?.filters.nativeQuantization ?? {}));
 const expiry = computed(() => status.value?.key.expiresAt ?? null);
 const expiryText = computed(() => (expiry.value ? new Date(expiry.value).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Never"));
-const expirySoon = computed(() => expiry.value !== null && Date.parse(expiry.value) - Date.now() < 14 * 86_400_000);
+const expirySoon = computed(() => expiry.value !== null && Date.parse(expiry.value) - clock.value.getTime() < 14 * 86_400_000);
 const workspaces = computed(() => status.value?.workspaces ?? []);
 const currentWorkspace = computed(() => s.value?.workspaceId ?? status.value?.workspace?.id ?? "");
 const rankBy = computed({
@@ -226,7 +226,7 @@ const btn = "h-8 rounded-lg border border-border bg-background px-3 text-[13px] 
           <span class="font-medium">Key expiry</span>
           <span class="flex items-center gap-2">
             <span class="tnum">{{ expiryText }}</span>
-            <StatusBadge v-if="expiry" :kind="expirySoon ? 'warn' : 'mute'">{{ inDays(expiry) }}</StatusBadge>
+            <StatusBadge v-if="expiry" :kind="expirySoon ? 'warn' : 'mute'">{{ inDays(expiry, clock.getTime()) }}</StatusBadge>
           </span>
         </div>
 

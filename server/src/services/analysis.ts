@@ -151,8 +151,8 @@ export function resolveProfile(model: ModelInput, settings: Settings, q: ViewQue
     h: model.h,
     r: model.r,
     tools: q.tools ?? false,
-    inputPerDay: actual > 0 ? actual : perDay,
-    estimated: actual <= 0,
+    inputPerDay: q.tokensPerDay ?? (actual > 0 ? actual : perDay),
+    estimated: q.tokensPerDay === undefined && actual <= 0,
   };
 }
 
@@ -548,11 +548,13 @@ export function buildOverview(ctx: Ctx): Overview {
     const presetRank = new Map((presetRanked ?? []).map((e, i) => [basisCalc.model.endpoints.indexOf(e), i + 1]));
     const cost = costs(model, presetRanked, current, desired, profile, days, settings);
     summary.default += cost.default ?? 0;
-    summary.bans += cost.bans ?? 0;
-    summary.presets += cost.preset ?? cost.bans ?? 0;
-    const risky = model.endpoints.reduce((s, e) => s + (e.quant === "low" || e.quant === "unknown" ? shares.get(e)! : 0), 0);
-    riskVolume += risky * profile.inputPerDay;
-    volume += profile.inputPerDay;
+    summary.bans += cost.bans ?? cost.default ?? 0;
+    summary.presets += cost.preset ?? cost.bans ?? cost.default ?? 0;
+    const routed = model.endpoints.reduce((s, e) => s + shares.get(e)!, 0);
+    if (input.openWeights !== false && routed > 0) {
+      riskVolume += model.endpoints.reduce((s, e) => s + (e.quant === "low" || e.quant === "unknown" ? shares.get(e)! : 0), 0) * profile.inputPerDay;
+      volume += profile.inputPerDay;
+    }
 
     const eligibleCosts = pool.map((e) => unitCost(e, profile.h, profile.r));
     const best = eligibleCosts.length ? Math.min(...eligibleCosts) : null;
@@ -698,25 +700,6 @@ export function buildProviders(ctx: Ctx): ProvidersView {
   const profiles = new Map(snapshot.models.map((m) => [m.slug, resolveProfile(m, settings, q)]));
   const target = optimize(models, fixed, vs, allowedProviders(ctx.bans)).target;
   const k = settings.optimizer.minEndpointsPerModel;
-  const spend = (base: ReadonlySet<string>, banned: ReadonlySet<string>) => {
-    let before = 0;
-    let after = 0;
-    let blocked = false;
-    for (const m of models) {
-      const p = profiles.get(m.slug)!;
-      const priceOf = (set: ReadonlySet<string>) => pricePerMillion(m, set, p.h, p.r, p.tools, settings.optimizer.routingPrice).price;
-      const was = priceOf(base);
-      if (was === null) continue;
-      const now = priceOf(banned);
-      if (now === null) {
-        blocked = true;
-        continue;
-      }
-      before += (was * p.inputPerDay * days) / 1_000_000;
-      after += (now * p.inputPerDay * days) / 1_000_000;
-    }
-    return { before, after, blocked };
-  };
 
   const names = new Map<string, string>();
   for (const m of models) for (const e of m.endpoints) if (!names.has(e.provider)) names.set(e.provider, e.providerName);
@@ -726,7 +709,7 @@ export function buildProviders(ctx: Ctx): ProvidersView {
     const without = new Set(desired);
     without.delete(provider);
     const withBan = new Set([...without, provider]);
-    const { before: base, after: banned, blocked } = spend(without, withBan);
+    const { before: base, after: banned, blocked } = costChange(models, profiles, without, withBan, days, settings);
     const perModel = models
       .filter((m) => m.endpoints.some((e) => e.provider === provider))
       .map((m) => {
@@ -945,23 +928,39 @@ export function buildPresets(ctx: Ctx, remote: ReadonlyMap<string, RemotePreset>
     });
 }
 
-export function spendChange(ctx: Ctx, before: ReadonlySet<string>, after: ReadonlySet<string>): { before: number; after: number | null } {
-  const { snapshot, settings, q } = ctx;
-  const vs = viewSettings(settings, q);
-  const days = q.days ?? settings.scenarios.days;
+function costChange(
+  models: ClassifiedModel[],
+  profiles: ReadonlyMap<string, Profile>,
+  before: ReadonlySet<string>,
+  after: ReadonlySet<string>,
+  days: number,
+  settings: Settings,
+): { before: number; after: number; blocked: boolean } {
   let was = 0;
-  let now: number | null = 0;
-  for (const input of snapshot.models) {
-    const m = classifyModel(input, vs);
-    const p = resolveProfile(input, settings, q);
+  let now = 0;
+  let blocked = false;
+  for (const m of models) {
+    const p = profiles.get(m.slug)!;
     const priceOf = (set: ReadonlySet<string>) => pricePerMillion(m, set, p.h, p.r, p.tools, settings.optimizer.routingPrice).price;
     const a = priceOf(before);
     if (a === null) continue;
     const b = priceOf(after);
+    if (b === null) {
+      blocked = true;
+      continue;
+    }
     was += (a * p.inputPerDay * days) / 1_000_000;
-    now = b === null || now === null ? null : now + (b * p.inputPerDay * days) / 1_000_000;
+    now += (b * p.inputPerDay * days) / 1_000_000;
   }
-  return { before: was, after: now };
+  return { before: was, after: now, blocked };
+}
+
+export function spendChange(ctx: Ctx, before: ReadonlySet<string>, after: ReadonlySet<string>): { before: number; after: number; blocked: boolean } {
+  const { snapshot, settings, q } = ctx;
+  const vs = viewSettings(settings, q);
+  const models = snapshot.models.map((input) => classifyModel(input, vs));
+  const profiles = new Map(snapshot.models.map((input) => [input.slug, resolveProfile(input, settings, q)]));
+  return costChange(models, profiles, before, after, q.days ?? settings.scenarios.days, settings);
 }
 
 export type HistoryEntry = RunRecord & { added: string[]; removed: string[]; source: "manual" | "auto" | "rollback" };
