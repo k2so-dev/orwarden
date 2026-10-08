@@ -5,7 +5,7 @@ import { z } from "zod";
 import { LoginLimiter, clientIp, endSession, passwordMatches, requireSession, sessionExpiry, startSession, type AuthOptions } from "./auth.ts";
 import { sendAlert } from "./core/alert.ts";
 import { HttpError } from "./core/openrouter.ts";
-import { buildOverview, buildProviders, spendFor } from "./services/analysis.ts";
+import { buildOverview, buildProviders, spendChange } from "./services/analysis.ts";
 import { applyBans, banHistory, discardDrafts, rollback } from "./services/bans.ts";
 import { listPresets, pinLegacySlugs, syncPresets, updatePresetSettings } from "./services/presets.ts";
 import { refresh } from "./services/refresh.ts";
@@ -235,7 +235,7 @@ export function createApp(rt: Runtime) {
         };
         return c.json({
           ...result,
-          cost: { before: spendFor(ctx, new Set(result.before)), after: spendFor(ctx, new Set(result.after)), days: view?.days ?? ctx.settings.scenarios.days },
+          cost: { ...spendChange(ctx, new Set(result.before), new Set(result.after)), days: view?.days ?? ctx.settings.scenarios.days },
         });
       },
     )

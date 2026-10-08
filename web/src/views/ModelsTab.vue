@@ -30,7 +30,7 @@ const presetSub = computed(() => {
   return `${saving >= 0 ? "saves" : "costs"} ${money(Math.abs(saving))} ${saving >= 0 ? "vs" : "more than"} default${noPreset.length ? ` · ${noPreset.length === 1 ? noPreset[0] : `${noPreset.length} models`} at ban routing` : ""}`;
 });
 const defaultTip = [
-  { text: "OpenRouter splits traffic across all endpoints by its own load balancing. Shares come from your last 7 days of traffic.", tone: "fg" as const },
+  { text: "OpenRouter splits traffic across endpoints by its own load balancing. Shares are estimated from each endpoint's price and uptime, the way OpenRouter weights them, not from your recorded traffic.", tone: "fg" as const },
 ];
 
 async function save(patch: { watchlist?: { slug: string; weightUsd: number }[]; excludedModels?: string[] }): Promise<"failed" | "saved" | "refreshed"> {

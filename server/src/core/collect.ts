@@ -53,11 +53,12 @@ export function stripVariant(slug: string): string {
 }
 
 export function aggregateUsage(rows: ActivityRow[], windowDays: number, now: Date) {
-  const since = now.getTime() - windowDays * 86_400_000;
+  const today = Math.floor(now.getTime() / 86_400_000) * 86_400_000;
+  const since = today - windowDays * 86_400_000;
   const byModel = new Map<string, { usd: number; prompt: number; completion: number; cached: number }>();
   for (const row of rows) {
     const day = Date.parse(`${row.date.replace(" ", "T")}Z`);
-    if (!Number.isFinite(day) || day < since) continue;
+    if (!Number.isFinite(day) || day < since || day >= today) continue;
     const acc = byModel.get(row.model) ?? { usd: 0, prompt: 0, completion: 0, cached: 0 };
     acc.usd += row.usage ?? 0;
     acc.prompt += row.prompt_tokens ?? 0;

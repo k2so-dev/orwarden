@@ -56,6 +56,11 @@ watch(settingsOpen, (open) => {
 
 const s = computed(() => draft.value);
 
+function setUptime(raw: string) {
+  if (!draft.value) return;
+  draft.value.filters.minUptime = raw.trim() === "" ? Number.NaN : Number(raw) / 100;
+}
+
 function setWorkspace(id: string) {
   if (draft.value) draft.value.workspaceId = id;
 }
@@ -251,7 +256,7 @@ const btn = "h-8 rounded-lg border border-border bg-background px-3 text-[13px] 
         </div>
           <span class="font-medium">Min uptime (1d)</span>
           <div class="flex items-center gap-1.5">
-            <input :value="Math.round(s.filters.minUptime * 100)" type="number" min="50" max="100" :class="num" @input="s.filters.minUptime = Number(($event.target as HTMLInputElement).value) / 100" />
+            <input :value="Number((s.filters.minUptime * 100).toFixed(2))" type="number" min="50" max="100" step="0.5" :class="num" @input="setUptime(($event.target as HTMLInputElement).value)" />
             <span class="text-muted-foreground">%</span>
           </div>
           <div>

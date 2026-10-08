@@ -5,6 +5,7 @@ import FilterBar from "@/components/shell/FilterBar.vue";
 import HeaderBar from "@/components/shell/HeaderBar.vue";
 import SettingsSheet from "@/components/settings/SettingsSheet.vue";
 import { ago, periodLabel } from "@/lib/format";
+import { clock } from "@/stores/ui";
 import { cn } from "@/lib/utils";
 import { filters, scenarioLabel } from "@/stores/filters";
 import { go, tab, TABS } from "@/stores/nav";
@@ -18,7 +19,7 @@ const noKey = computed(() => status.value !== null && status.value.health === "n
 const ready = computed(() => overview.value !== null);
 const unreachable = computed(() => status.value?.health === "unreachable");
 const invalidKey = computed(() => status.value?.health === "invalid-key");
-const lastGood = computed(() => ago(status.value?.takenAt));
+const lastGood = computed(() => ago(status.value?.takenAt, clock.value.getTime()));
 const errorText = computed(() => status.value?.lastError?.message ?? loadError.value ?? "OpenRouter did not respond.");
 const skeleton = computed(() => loading.value && !ready.value);
 const noData = computed(() => !skeleton.value && !ready.value);

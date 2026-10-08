@@ -7,9 +7,11 @@ import ApplyDialog from "@/components/providers/ApplyDialog.vue";
 import { client, unwrap, type ApplyResult, type HistoryItem, type ProviderRow } from "@/lib/api";
 import { dateTime, money, signedMoney, signedPct } from "@/lib/format";
 import { shortIssue, type TipLine } from "@/lib/issues";
-import { act, dryRun, history, previewOnly, providers, reloadAfterWrite, writeBlocked } from "@/stores/data";
+import { act, dryRun, history, previewOnly, providers, reloadAfterWrite, settings, writeBlocked } from "@/stores/data";
 import { viewQuery } from "@/stores/filters";
 import { confirmAction } from "@/stores/confirm";
+
+const minGood = computed(() => settings.value?.optimizer.minEndpointsPerModel ?? 2);
 
 const pending = computed(() => providers.value?.pending ?? null);
 const pendingCount = computed(() => (pending.value?.added.length ?? 0) + (pending.value?.removed.length ?? 0));
@@ -173,7 +175,7 @@ const btn = "h-8 rounded-lg px-3 text-[13px] font-medium";
         <span class="px-2.5">Models · verdict</span>
         <span class="px-2.5">Worst issue</span>
         <span class="px-2.5 text-right">Effect of banning</span>
-        <span class="px-2.5">Drops below 2 good</span>
+        <span class="px-2.5">Drops below {{ minGood }} good</span>
         <span class="px-2.5" :title="POLICY_TIP">Policy</span>
       </div>
       <div

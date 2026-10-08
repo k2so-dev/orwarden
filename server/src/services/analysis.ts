@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { classifyModel, modelMinQuantization, modelMinQuantRank, quantRank } from "../core/classify.ts";
-import { unitCost } from "../core/cost.ts";
+import { routingWeight, unitCost } from "../core/cost.ts";
 import { pricePerMillion } from "../core/forecast.ts";
 import type { ProviderState } from "../core/hysteresis.ts";
 import type { Guardrail } from "../core/openrouter.ts";
@@ -284,10 +284,11 @@ export function servable<T extends { tools: boolean }>(ranked: readonly T[], too
   return tools ? ranked.filter((e) => e.tools) : [...ranked];
 }
 
-export function routingShares(model: ClassifiedModel, banned: ReadonlySet<string>, tools: boolean, settings: Settings): Map<ClassifiedEndpoint, number> {
-  const live = model.endpoints.filter((e) => !banned.has(e.provider) && (!tools || e.tools));
-  const total = live.reduce((s, e) => s + e.weight, 0);
-  return new Map(model.endpoints.map((e) => [e, total > 0 && live.includes(e) ? e.weight / total : 0]));
+export function routingShares(model: ClassifiedModel, banned: ReadonlySet<string>, profile: Pick<Profile, "h" | "r" | "tools">, settings: Settings): Map<ClassifiedEndpoint, number> {
+  const live = model.endpoints.filter((e) => !banned.has(e.provider) && (!profile.tools || e.tools));
+  const weight = (e: ClassifiedEndpoint) => routingWeight(e, profile.h, profile.r, settings.optimizer.routingPrice);
+  const total = live.reduce((s, e) => s + weight(e), 0);
+  return new Map(model.endpoints.map((e) => [e, total > 0 && live.includes(e) ? weight(e) / total : 0]));
 }
 
 const slugPart = (s: string) => s.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase();
@@ -472,7 +473,7 @@ function calcModel(input: ModelInput, ctx: Ctx, basis: Basis, current: Set<strin
   const pool = model.endpoints.filter((e) => isEligible(e, profile, desired, basis.zdrOnly));
   const scores = scoreEndpoints(model.endpoints, profile, pool, basis.weights);
   const ranked = rankForPreset(model, profile, desired, scores, ctx.presets.get(model.slug), ctx.settings.presets.topN, basis.zdrOnly, ctx.settings.presets.rankBy);
-  return { model, profile, scores, pool, ranked, shares: routingShares(model, current, profile.tools, ctx.settings) };
+  return { model, profile, scores, pool, ranked, shares: routingShares(model, current, profile, ctx.settings) };
 }
 
 function costs(model: ClassifiedModel, ranked: ClassifiedEndpoint[] | null, current: Set<string>, desired: Set<string>, p: Pick<Profile, "h" | "r" | "tools" | "inputPerDay">, days: number, settings: Settings): CostTriple {
@@ -598,7 +599,7 @@ export function buildOverview(ctx: Ctx): Overview {
       { name: DEFAULT_SCENARIO, tools: false, h: input.h, r: input.r },
       ...settings.scenarios.profiles.map((p) => ({ name: p.name, tools: p.tools, h: p.h, r: p.r })),
     ].map((s) => {
-      const p = resolveProfile(input, settings, { ...q, scenario: s.name });
+      const p = resolveProfile(input, settings, { ...q, scenario: s.name, tokensPerDay: q.tokensPerDay ?? profile.inputPerDay });
       return { ...s, h: p.h, r: p.r, tools: p.tools, inputPerDay: p.inputPerDay, ...costs(model, presetRanked, current, desired, p, days, settings) };
     });
 
@@ -697,15 +698,24 @@ export function buildProviders(ctx: Ctx): ProvidersView {
   const profiles = new Map(snapshot.models.map((m) => [m.slug, resolveProfile(m, settings, q)]));
   const target = optimize(models, fixed, vs, allowedProviders(ctx.bans)).target;
   const k = settings.optimizer.minEndpointsPerModel;
-  const spend = (banned: ReadonlySet<string>) => {
-    let total = 0;
+  const spend = (base: ReadonlySet<string>, banned: ReadonlySet<string>) => {
+    let before = 0;
+    let after = 0;
+    let blocked = false;
     for (const m of models) {
       const p = profiles.get(m.slug)!;
-      const price = pricePerMillion(m, banned, p.h, p.r, p.tools, settings.optimizer.routingPrice).price;
-      if (price === null) return null;
-      total += (price * p.inputPerDay * days) / 1_000_000;
+      const priceOf = (set: ReadonlySet<string>) => pricePerMillion(m, set, p.h, p.r, p.tools, settings.optimizer.routingPrice).price;
+      const was = priceOf(base);
+      if (was === null) continue;
+      const now = priceOf(banned);
+      if (now === null) {
+        blocked = true;
+        continue;
+      }
+      before += (was * p.inputPerDay * days) / 1_000_000;
+      after += (now * p.inputPerDay * days) / 1_000_000;
     }
-    return total;
+    return { before, after, blocked };
   };
 
   const names = new Map<string, string>();
@@ -716,8 +726,7 @@ export function buildProviders(ctx: Ctx): ProvidersView {
     const without = new Set(desired);
     without.delete(provider);
     const withBan = new Set([...without, provider]);
-    const base = spend(without);
-    const banned = spend(withBan);
+    const { before: base, after: banned, blocked } = spend(without, withBan);
     const perModel = models
       .filter((m) => m.endpoints.some((e) => e.provider === provider))
       .map((m) => {
@@ -741,9 +750,9 @@ export function buildProviders(ctx: Ctx): ProvidersView {
       inTarget: target.has(provider),
       models: perModel,
       worst: worstModel && worstModel.reasons.length ? `${worstModel.reasons[0]} (${worstModel.name})` : null,
-      effect: base === null || banned === null ? null : banned - base,
-      effectPct: base === null || banned === null || base === 0 ? null : (banned - base) / base,
-      blocked: banned === null,
+      effect: blocked ? null : banned - base,
+      effectPct: blocked || base === 0 ? null : (banned - base) / base,
+      blocked,
       breaks,
     };
   });
@@ -830,7 +839,9 @@ export function buildPresets(ctx: Ctx, remote: ReadonlyMap<string, RemotePreset>
       const preset = ctx.presets.get(input.slug);
       const basis = presetBasis(ctx, input.slug);
       const calc = calcModel(input, ctx, basis, current, desired);
-      const { model, profile, ranked, scores, pool: eligible } = calc;
+      const { model, profile, ranked, scores, pool } = calc;
+      const excludedTags = new Set(preset?.excluded ?? []);
+      const eligible = pool.filter((e) => !excludedTags.has(e.tag));
       const slug = slugs.get(model.slug)!;
       const config = presetConfig(model, ranked, profile, settings);
       const hash = configHash(config);
@@ -858,7 +869,7 @@ export function buildPresets(ctx: Ctx, remote: ReadonlyMap<string, RemotePreset>
         { name: DEFAULT_SCENARIO, tools: false },
         ...settings.scenarios.profiles.map((p) => ({ name: p.name, tools: p.tools })),
       ].map((sc) => {
-        const p = resolveProfile(input, settings, { scenario: sc.name });
+        const p = resolveProfile(input, settings, { scenario: sc.name, tokensPerDay: profile.inputPerDay });
         return {
           name: sc.name,
           h: p.h,
@@ -934,19 +945,23 @@ export function buildPresets(ctx: Ctx, remote: ReadonlyMap<string, RemotePreset>
     });
 }
 
-export function spendFor(ctx: Ctx, banned: ReadonlySet<string>): number | null {
+export function spendChange(ctx: Ctx, before: ReadonlySet<string>, after: ReadonlySet<string>): { before: number; after: number | null } {
   const { snapshot, settings, q } = ctx;
   const vs = viewSettings(settings, q);
   const days = q.days ?? settings.scenarios.days;
-  let total = 0;
+  let was = 0;
+  let now: number | null = 0;
   for (const input of snapshot.models) {
     const m = classifyModel(input, vs);
     const p = resolveProfile(input, settings, q);
-    const price = pricePerMillion(m, banned, p.h, p.r, p.tools, settings.optimizer.routingPrice).price;
-    if (price === null) return null;
-    total += (price * p.inputPerDay * days) / 1_000_000;
+    const priceOf = (set: ReadonlySet<string>) => pricePerMillion(m, set, p.h, p.r, p.tools, settings.optimizer.routingPrice).price;
+    const a = priceOf(before);
+    if (a === null) continue;
+    const b = priceOf(after);
+    was += (a * p.inputPerDay * days) / 1_000_000;
+    now = b === null || now === null ? null : now + (b * p.inputPerDay * days) / 1_000_000;
   }
-  return total;
+  return { before: was, after: now };
 }
 
 export type HistoryEntry = RunRecord & { added: string[]; removed: string[]; source: "manual" | "auto" | "rollback" };

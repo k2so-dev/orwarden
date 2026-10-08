@@ -1,6 +1,9 @@
 import { useStorage } from "@vueuse/core";
 import { ref, shallowRef, watchEffect } from "vue";
 
+export const clock = shallowRef(new Date());
+setInterval(() => (clock.value = new Date()), 30_000);
+
 export const theme = useStorage<"light" | "dark">("rr-theme", "light");
 export const density = useStorage<"compact" | "comfortable">("rr-density", "compact");
 export const columns = useStorage("rr-columns", { zt: true, lat: true, share: true, brk: true });

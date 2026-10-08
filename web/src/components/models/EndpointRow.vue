@@ -57,11 +57,6 @@ const ban = computed(() => {
   return { kind: "none" as BadgeKind, text: "—", tip: "Not banned. Global bans remove a provider from all models." };
 });
 
-const weights = computed(() => {
-  const f = filters.value;
-  const total = f.wPrice + f.wSpeed + f.wReliability || 1;
-  return { p: Math.round((f.wPrice / total) * 100), s: Math.round((f.wSpeed / total) * 100), r: Math.round((f.wReliability / total) * 100) };
-});
 
 function tipVerdict(e: Event) {
   const title = props.row.verdict === "ok" ? "Verdict: ok" : `Verdict: ${props.row.verdict}`;
@@ -72,11 +67,19 @@ function tipBan(e: Event) {
 }
 function tipScore(e: Event) {
   const s = props.row.scores;
-  const w = weights.value;
-  const speed = props.row.tps === null ? "—" : Math.round(s.speed);
-  showTip(e, "Overall score", [
-    { text: `Price ${Math.round(s.price)} × ${w.p}% + Speed ${speed} × ${w.s}% + Reliability ${Math.round(s.reliability)} × ${w.r}% = ${Math.round(s.overall)}`, tone: "fg" },
-  ]);
+  const f = filters.value;
+  const total = f.wPrice + f.wSpeed + f.wReliability || 1;
+  const weighted = (s.price * f.wPrice + s.speed * f.wSpeed + s.reliability * f.wReliability) / total;
+  const penalty = props.row.quant === "unknown" ? (settings.value?.scoring.unknownQuantPenalty ?? 0) : 0;
+  const lines: TipLine[] = [
+    {
+      text: `(Price ${Math.round(s.price)} × ${f.wPrice} + Speed ${Math.round(s.speed)} × ${f.wSpeed} + Reliability ${Math.round(s.reliability)} × ${f.wReliability}) / ${total} = ${weighted.toFixed(1)}`,
+      tone: "fg",
+    },
+  ];
+  if (penalty > 0) lines.push({ text: `− ${penalty} for undisclosed quantization = ${Math.round(s.overall)}`, tone: "fg" });
+  if (props.row.tps === null || props.row.latencyMs === null) lines.push({ text: "Speed uses a 30% placeholder where throughput or latency is unknown.", tone: "muted" });
+  showTip(e, "Overall score", lines);
 }
 
 const upTone = computed(() => (props.row.uptime < (filters.value.minUptime ?? 97) / 100 ? "text-bad" : ""));

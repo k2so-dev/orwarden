@@ -1,6 +1,7 @@
 <script setup lang="ts" vapor>
 import { computed } from "vue";
 import { client, unwrap } from "@/lib/api";
+import { clock } from "@/stores/ui";
 import { ago, dateTime, inDays, inFuture } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import Segmented from "@/components/app/Segmented.vue";
@@ -64,10 +65,10 @@ const keyTip = computed(() => {
   const parts = [s.key.label ?? (s.key.source === "env" ? "Key from environment" : "Stored key"), s.workspace?.name ?? "", s.key.expiresAt ? `expires ${dateTime(s.key.expiresAt, ", ")}` : "no expiry"];
   return parts.filter(Boolean).join(" · ");
 });
-const dataLabel = computed(() => (refreshing.value ? "Refreshing…" : status.value?.takenAt ? `Data ${ago(status.value.takenAt)}` : "No data yet"));
+const dataLabel = computed(() => (refreshing.value ? "Refreshing…" : status.value?.takenAt ? `Data ${ago(status.value.takenAt, clock.value.getTime())}` : "No data yet"));
 const stale = computed(() => ["stale", "unreachable", "invalid-key"].includes(status.value?.health ?? "") && Boolean(status.value?.takenAt));
 const next = computed(() =>
-  status.value?.nextRunAt && (status.value.health === "ok" || status.value.health === "stale") ? `next in ${inFuture(status.value.nextRunAt)}` : "",
+  status.value?.nextRunAt && (status.value.health === "ok" || status.value.health === "stale") ? `next in ${inFuture(status.value.nextRunAt, clock.value.getTime())}` : "",
 );
 const noKey = computed(() => status.value?.health === "no-key");
 const workspace = computed(() => status.value?.workspace?.name ?? "—");
