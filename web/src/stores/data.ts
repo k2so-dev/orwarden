@@ -12,7 +12,7 @@ import {
   type Settings,
   type Status,
 } from "@/lib/api";
-import { viewQuery } from "./filters";
+import { filters, setWeights, viewQuery } from "./filters";
 import { notify } from "./toast";
 
 export const authenticated = ref<boolean | null>(null);
@@ -21,6 +21,7 @@ export const settings = shallowRef<Settings | null>(null);
 export const overview = shallowRef<Overview | null>(null);
 export const providers = shallowRef<ProvidersView | null>(null);
 export const presets = shallowRef<PresetView[] | null>(null);
+export const presetsFailed = ref(false);
 export const history = shallowRef<BanHistory>([]);
 export const loading = ref(false);
 export const refreshing = ref(false);
@@ -28,6 +29,43 @@ export const loadError = ref<string | null>(null);
 
 export const dryRun = computed(() => (settings.value?.mode ?? "dry-run") === "dry-run");
 export const hasData = computed(() => status.value !== null && status.value.takenAt !== null);
+export const writeBlocked = computed(() => {
+  const health = status.value?.health;
+  if (health === "invalid-key") return "OpenRouter rejected the management key. Replace it in Settings.";
+  if (health === "unreachable") return "OpenRouter is unreachable. Retry when it recovers.";
+  return null;
+});
+export const presetsByModel = computed(() => new Map((presets.value ?? []).map((p) => [p.model, p])));
+
+function savedView(s: Settings) {
+  return {
+    minQuant: s.filters.minQuantization,
+    minUptime: Number((s.filters.minUptime * 100).toFixed(4)),
+    zdrOnly: s.filters.zdrOnly,
+    wPrice: s.scoring.price,
+    wSpeed: s.scoring.speed,
+    wReliability: s.scoring.reliability,
+  };
+}
+
+export const uptimeFloor = computed(() => Math.min(90, Math.floor((settings.value?.filters.minUptime ?? 0.9) * 100)));
+
+export const viewDiffers = computed(() => {
+  const s = settings.value;
+  if (!s) return false;
+  const f = filters.value;
+  const saved = savedView(s);
+  return (Object.keys(saved) as (keyof typeof saved)[]).some((k) =>
+    typeof saved[k] === "number" ? Math.abs((f[k] as number) - (saved[k] as number)) > 1e-4 : f[k] !== saved[k],
+  );
+});
+
+export function resetViewToSaved(): void {
+  if (!settings.value) return;
+  const saved = savedView(settings.value);
+  Object.assign(filters.value, { minQuant: saved.minQuant, minUptime: saved.minUptime, zdrOnly: saved.zdrOnly });
+  setWeights({ price: saved.wPrice, speed: saved.wSpeed, reliability: saved.wReliability });
+}
 
 export function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -75,8 +113,11 @@ async function guard<T>(task: () => Promise<T>): Promise<T | null> {
   }
 }
 
+let viewsSeq = 0;
+
 export async function loadViews(): Promise<void> {
   if (!hasData.value) return;
+  const seq = ++viewsSeq;
   const query = viewQuery.value;
   const [o, p, pr, h] = await Promise.all([
     guard(() => unwrap(client.overview.$get({ query }))),
@@ -84,9 +125,11 @@ export async function loadViews(): Promise<void> {
     guard(() => unwrap(client.presets.$get({ query: { ...query, fresh: "false" } }))),
     guard(() => unwrap(client.bans.history.$get({ query: { limit: "30" } }))),
   ]);
+  if (seq !== viewsSeq) return;
   if (o) overview.value = o;
   if (p) providers.value = p;
   if (pr) presets.value = pr;
+  presetsFailed.value = pr === null;
   if (h) history.value = h;
 }
 
@@ -103,7 +146,7 @@ export async function reloadAfterWrite(): Promise<void> {
   await loadViews();
 }
 
-export async function refreshNow(full = false): Promise<void> {
+export async function refreshNow(full = false): Promise<boolean> {
   refreshing.value = true;
   let ok = false;
   try {
@@ -116,6 +159,7 @@ export async function refreshNow(full = false): Promise<void> {
     refreshing.value = false;
   }
   if (ok) notify(full ? "Full cycle finished" : "Data refreshed", dataSummary());
+  return ok;
 }
 
 const debounced = refDebounced(viewQuery, 250);
@@ -138,6 +182,34 @@ export async function act<T>(task: () => Promise<T>, success?: string, desc?: st
     notify("Write failed", message(err), "err");
     return null;
   }
+}
+
+export const savingDefaults = ref(false);
+
+export async function saveViewAsDefaults(): Promise<void> {
+  if (savingDefaults.value) return;
+  savingDefaults.value = true;
+  const f = filters.value;
+  const s = settings.value;
+  const uptimeChanged = !s || Math.abs(f.minUptime - savedView(s).minUptime) > 1e-4;
+  const res = await act(
+    () =>
+      unwrap(
+        client.settings.$put({
+          json: {
+            filters: { minQuantization: f.minQuant, minUptime: uptimeChanged ? f.minUptime / 100 : undefined, zdrOnly: f.zdrOnly },
+            scoring: { price: f.wPrice, speed: f.wSpeed, reliability: f.wReliability },
+          },
+        }),
+      ),
+    "Saved as defaults",
+    "Presets and auto-sync use these rules; quant and uptime also drive scheduled bans",
+  );
+  if (res) {
+    settings.value = res;
+    await reloadAfterWrite();
+  }
+  savingDefaults.value = false;
 }
 
 export function previewOnly(): void {

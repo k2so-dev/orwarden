@@ -1,7 +1,7 @@
 import { createClient, type OpenRouterApi } from "../core/openrouter.ts";
 import type { Store } from "../db.ts";
 import type { Env } from "../env.ts";
-import { DEFAULT_SETTINGS, mergeSettings, type Settings } from "../settings.ts";
+import { DEFAULT_SETTINGS, PRESET_SLUG_RE, mergeSettings, type Settings } from "../settings.ts";
 import type { Vault } from "../vault.ts";
 import type { AppSnapshot, BanInputs } from "./analysis.ts";
 
@@ -59,6 +59,9 @@ export class Runtime {
 
   updateSettings(patch: unknown): Settings {
     const next = mergeSettings(this.settings(), patch);
+    if (next.presets.slugPattern !== this.settings().presets.slugPattern && !PRESET_SLUG_RE.test(next.presets.slugPattern.replace("{model}", "model"))) {
+      throw new AppError(400, "invalid-slug-pattern", "Slug pattern may only use lowercase letters, digits and hyphens around {model}");
+    }
     const cronChanged = next.refreshCron !== this.settings().refreshCron;
     this.store.setValue("settings", next);
     this.cachedSettings = next;

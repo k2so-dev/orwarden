@@ -2,18 +2,25 @@
 import { computed, ref, shallowRef } from "vue";
 import StatusBadge, { type BadgeKind } from "@/components/app/StatusBadge.vue";
 import Tip from "@/components/app/Tip.vue";
-import Toggle from "@/components/app/Toggle.vue";
+import Segmented from "@/components/app/Segmented.vue";
 import ApplyDialog from "@/components/providers/ApplyDialog.vue";
 import { client, unwrap, type ApplyResult, type HistoryItem, type ProviderRow } from "@/lib/api";
 import { dateTime, money, signedMoney, signedPct } from "@/lib/format";
 import { shortIssue, type TipLine } from "@/lib/issues";
-import { act, dryRun, history, previewOnly, providers, reloadAfterWrite } from "@/stores/data";
+import { act, dryRun, history, previewOnly, providers, reloadAfterWrite, writeBlocked } from "@/stores/data";
 import { viewQuery } from "@/stores/filters";
+import { confirmAction } from "@/stores/confirm";
 
 const pending = computed(() => providers.value?.pending ?? null);
 const pendingCount = computed(() => (pending.value?.added.length ?? 0) + (pending.value?.removed.length ?? 0));
 const VERDICT: Record<string, BadgeKind> = { ok: "ok", outlier: "warn", "hard-bad": "bad" };
-const GRID = "grid grid-cols-[190px_170px_minmax(280px,1fr)_minmax(220px,.8fr)_150px_160px_64px] min-w-[1180px] items-center";
+const GRID = "grid grid-cols-[160px_140px_minmax(240px,1fr)_minmax(180px,.8fr)_130px_130px_176px] min-w-[1180px] items-center";
+const POLICIES = [
+  { value: "auto", label: "Auto" },
+  { value: "ban", label: "Ban" },
+  { value: "allow", label: "Allow" },
+];
+const POLICY_TIP = "Auto: the scheduler bans and unbans by quality. Ban: always ignored. Allow: never auto-banned.";
 
 const rank = (r: ProviderRow) => (r.ban.inDesired ? 0 : r.ban.pending ? 1 : 2);
 const rows = computed(() =>
@@ -23,7 +30,8 @@ const rows = computed(() =>
 );
 
 function status(r: ProviderRow): { kind: BadgeKind; text: string } {
-  if (r.ban.inGuardrail) return { kind: "bad", text: r.ban.auto ? "auto ban" : "manual ban" };
+  if (r.ban.inGuardrail) return { kind: "bad", text: r.ban.auto && r.ban.policy !== "ban" ? "auto ban" : "manual ban" };
+  if (r.ban.policy === "allow") return { kind: "ok", text: "always allowed" };
   const p = r.ban.pending;
   if (p) return { kind: "warn", text: `${p.action === "ban" ? "pending" : "unban"} ${p.streak} of ${p.needed} runs` };
   return { kind: "none", text: "none" };
@@ -57,8 +65,9 @@ function effect(r: ProviderRow): { text: string; pct: string; tone: string } {
   };
 }
 
-async function setBan(r: ProviderRow, on: boolean) {
-  const policy = on ? "ban" : r.ban.auto ? "allow" : null;
+async function setPolicy(r: ProviderRow, value: string) {
+  const policy = value === "ban" || value === "allow" ? value : null;
+  if (policy === r.ban.policy) return;
   await act(() => unwrap(client.providers[":slug"].policy.$put({ param: { slug: r.provider }, json: { policy } })));
   await reloadAfterWrite();
 }
@@ -99,6 +108,13 @@ async function confirm() {
 }
 
 async function rollback(h: HistoryItem) {
+  const ok = await confirmAction(
+    "Roll back this change?",
+    `The guardrail is restored to the list from before ${dateTime(h.startedAt)} and written to OpenRouter right away.`,
+    "Roll back",
+    true,
+  );
+  if (!ok) return;
   const res = await act(
     () => unwrap(client.bans.rollback.$post({ json: { runId: h.id } })),
     "Rolled back",
@@ -133,13 +149,20 @@ const btn = "h-8 rounded-lg px-3 text-[13px] font-medium";
 
     <div class="flex flex-wrap items-center gap-2.5 rounded-xl border border-border bg-card py-2.5 pl-4 pr-3">
       <span class="text-[13px] font-semibold">Pending changes</span>
-      <StatusBadge v-for="p in pending?.added ?? []" :key="'a' + p" kind="ok" class="h-[22px] text-xs">+ {{ p }}</StatusBadge>
-      <StatusBadge v-for="p in pending?.removed ?? []" :key="'r' + p" kind="bad" class="h-[22px] text-xs">− {{ p }}</StatusBadge>
+      <StatusBadge v-for="p in pending?.added ?? []" :key="'a' + p" kind="bad" class="h-[22px] text-xs" title="Will be banned">+ {{ p }}</StatusBadge>
+      <StatusBadge v-for="p in pending?.removed ?? []" :key="'r' + p" kind="ok" class="h-[22px] text-xs" title="Will be unbanned">− {{ p }}</StatusBadge>
       <span v-if="pendingCount === 0" class="text-[13px] text-muted-foreground">None — draft matches the guardrail</span>
       <div class="ml-auto flex gap-2">
-        <button type="button" :class="[btn, 'hover:bg-accent']" @click="discard">Discard</button>
-        <button v-if="!dryRun" type="button" :class="[btn, 'border border-border bg-background hover:bg-accent']" @click="openDialog">Preview</button>
-        <button type="button" :class="[btn, 'bg-primary text-primary-foreground']" @click="openDialog">{{ dryRun ? "Preview" : "Apply to guardrail" }}</button>
+        <button type="button" :disabled="pendingCount === 0" :class="[btn, 'hover:bg-accent disabled:opacity-40']" title="Reset the draft to the current guardrail" @click="discard">Discard</button>
+        <button
+          type="button"
+          :disabled="!dryRun && writeBlocked !== null"
+          :title="!dryRun && writeBlocked ? writeBlocked : 'Review the diff before anything is written'"
+          :class="[btn, 'bg-primary text-primary-foreground disabled:opacity-50']"
+          @click="openDialog"
+        >
+          {{ dryRun ? "Preview diff" : "Review & apply" }}
+        </button>
       </div>
     </div>
 
@@ -151,7 +174,7 @@ const btn = "h-8 rounded-lg px-3 text-[13px] font-medium";
         <span class="px-2.5">Worst issue</span>
         <span class="px-2.5 text-right">Effect of banning</span>
         <span class="px-2.5">Drops below 2 good</span>
-        <span class="px-2.5">Ban</span>
+        <span class="px-2.5" :title="POLICY_TIP">Policy</span>
       </div>
       <div
         v-for="r in rows"
@@ -180,7 +203,7 @@ const btn = "h-8 rounded-lg px-3 text-[13px] font-medium";
           <template v-if="r.breaks.length > 0">⚠ {{ r.breaks.join(", ") }}</template>
         </div>
         <div class="px-2.5">
-          <Toggle :model-value="r.ban.inDesired" :label="`Ban ${r.provider}`" @update:model-value="setBan(r, $event)" />
+          <Segmented :model-value="r.ban.policy ?? 'auto'" :options="POLICIES" size="sm" :title="POLICY_TIP" @update:model-value="setPolicy(r, $event)" />
         </div>
       </div>
     </div>
@@ -199,7 +222,7 @@ const btn = "h-8 rounded-lg px-3 text-[13px] font-medium";
           <StatusBadge v-for="p in h.removed" :key="'r' + p" kind="ok">− {{ p }}</StatusBadge>
         </span>
         <span class="truncate text-muted-foreground" :title="who(h)">{{ who(h) }}</span>
-        <button type="button" :disabled="!h.patched" :title="h.patched ? 'Restore the list from before this change' : 'This run did not write to OpenRouter'" class="inline-flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-[12.5px] font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40" @click="rollback(h)">
+        <button type="button" :disabled="!h.patched || writeBlocked !== null" :title="writeBlocked ?? (h.patched ? 'Restore the list from before this change' : 'This run did not write to OpenRouter')" class="inline-flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-[12.5px] font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40" @click="rollback(h)">
           <svg class="size-[13px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
           Rollback
         </button>

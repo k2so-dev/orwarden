@@ -6,15 +6,33 @@ import { copy } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import Segmented from "@/components/app/Segmented.vue";
-import { columns, density, openModels, toggleIn } from "@/stores/ui";
-import { overview } from "@/stores/data";
+import StatusBadge from "@/components/app/StatusBadge.vue";
+import { presetStatus, type PresetStatusInfo } from "@/lib/presetStatus";
+import { columns, density, modelOpen, setModelOpen } from "@/stores/ui";
+import { go } from "@/stores/nav";
+import { overview, presets, presetsByModel, presetsFailed } from "@/stores/data";
 import EndpointTable from "./EndpointTable.vue";
 import ScenarioTable from "./ScenarioTable.vue";
 
-const props = defineProps<{ model: ModelView; index: number }>();
+const props = defineProps<{ model: ModelView; defaultOpen: boolean }>();
 
-const toggle = () => toggleIn(openModels, props.model.slug);
-const open = computed(() => (props.index < 2) !== openModels.value.has(props.model.slug));
+const open = computed(() => modelOpen.value.get(props.model.slug) ?? props.defaultOpen);
+const toggle = () => setModelOpen(props.model.slug, !open.value);
+const usageDays = computed(() => overview.value?.usageDays ?? 7);
+
+const presetState = computed<PresetStatusInfo>(() => {
+  if (!props.model.presetId) return { kind: "mute", text: "No preset", tip: "Only one provider serves this model, so there is nothing to route between.", copyable: false, create: false };
+  const preset = presetsByModel.value.get(props.model.slug);
+  if (presetsFailed.value) return { kind: "mute", text: "Status unavailable", tip: "Preset status failed to load. Refresh to retry.", copyable: false, create: false };
+  if (presets.value === null) return { kind: "mute", text: "Loading", tip: "Preset status is not loaded yet.", copyable: false, create: false };
+  if (!preset) return { kind: "mute", text: "Status unavailable", tip: "This model is not in the preset list yet. Refresh to load its status.", copyable: false, create: false };
+  return presetStatus(preset);
+});
+const presetId = computed(() => presetsByModel.value.get(props.model.slug)?.presetId ?? props.model.presetId);
+const copyPreset = () => {
+  const preset = presetsByModel.value.get(props.model.slug);
+  if (preset) void copy(preset.presetId);
+};
 const days = computed(() => overview.value?.horizonDays ?? 7);
 const horizonLabel = computed(() => periodLabel(days.value));
 const volume = computed(() => (overview.value?.scenario.name === "actual" ? "actual volume" : `${vol(props.model.profile.inputPerDay)} input / day`));
@@ -41,7 +59,7 @@ const densityModel = computed({
 
 <template>
   <section class="rounded-xl border border-border bg-card">
-    <div class="flex cursor-pointer flex-wrap items-center gap-3.5 px-4 py-3" @click="toggle">
+    <div class="flex cursor-pointer flex-wrap items-center gap-3.5 px-4 py-3" role="button" tabindex="0" :aria-expanded="open" @click="toggle" @keydown.enter.self="toggle" @keydown.space.self.prevent="toggle">
       <svg :class="cn('size-4 transition-transform', !open && '-rotate-90')" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
         <path d="m6 9 6 6 6-6"></path>
       </svg>
@@ -50,7 +68,7 @@ const densityModel = computed({
         <span class="font-mono text-xs text-muted-foreground">{{ model.slug }}</span>
       </div>
       <div class="tnum flex flex-wrap gap-4 text-[12.5px] text-muted-foreground">
-        <span>7-day spend <b class="font-semibold text-foreground">{{ money(model.usageUsd) }}</b></span>
+        <span>{{ usageDays }}-day spend <b class="font-semibold text-foreground">{{ money(model.usageUsd) }}</b></span>
         <span>cache hit <b class="font-semibold text-foreground">{{ pct(model.h) }}</b></span>
         <span>out/in <b class="font-semibold text-foreground">{{ model.r.toFixed(2) }}</b></span>
         <span class="inline-flex items-center gap-1.5">
@@ -60,12 +78,24 @@ const densityModel = computed({
           <span class="ml-1 size-1.5 rounded-full bg-bad"></span>{{ model.counts.hardBad }} bad
         </span>
       </div>
-      <div class="ml-auto flex items-center gap-1.5" @click.stop>
-        <code class="rounded-md bg-muted px-2 py-[5px] font-mono text-xs">{{ model.presetId }}</code>
+      <div class="ml-auto flex items-center gap-1.5" @click.stop @keydown.stop>
+        <StatusBadge :kind="presetState.kind" :title="presetState.tip">{{ presetState.text }}</StatusBadge>
+        <code v-if="model.presetId" :class="cn('select-all rounded-md bg-muted px-2 py-[5px] font-mono text-xs', !presetState.copyable && 'text-muted-foreground')">{{ presetId }}</code>
         <button
+          v-if="presetState.create"
           type="button"
-          class="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 text-[12.5px] font-medium hover:bg-accent"
-          @click="copy(model.presetId)"
+          class="inline-flex h-7 items-center rounded-lg px-2.5 text-[12.5px] font-medium hover:bg-accent"
+          @click="go('presets')"
+        >
+          Open presets
+        </button>
+        <button
+          v-if="model.presetId"
+          type="button"
+          :disabled="!presetState.copyable"
+          :title="presetState.copyable ? 'Copy the preset id' : presetState.tip"
+          class="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 text-[12.5px] font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+          @click="copyPreset"
         >
           <svg class="size-[13px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <rect width="14" height="14" x="8" y="8" rx="2"></rect>

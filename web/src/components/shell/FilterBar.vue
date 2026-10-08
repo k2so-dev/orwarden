@@ -5,8 +5,8 @@ import Toggle from "@/components/app/Toggle.vue";
 import RangeSlider from "@/components/app/RangeSlider.vue";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { ANSWER_TAGS, CONTEXT_TAGS, DAY_OPTIONS, DEFAULT_WEIGHTS, QUANT_OPTIONS, QUICK_WORKLOADS, filters, resetWeights, workloadSummary } from "@/stores/filters";
-import { overview, settings } from "@/stores/data";
+import { ANSWER_TAGS, CONTEXT_TAGS, DAY_OPTIONS, DEFAULT_WEIGHTS, QUANT_OPTIONS, QUICK_WORKLOADS, filters, scenarioLabel, setWeights, workloadSummary } from "@/stores/filters";
+import { overview, resetViewToSaved, saveViewAsDefaults, savingDefaults, settings, uptimeFloor, viewDiffers } from "@/stores/data";
 
 const MODES = [
   { value: "actual", label: "Actual traffic" },
@@ -14,6 +14,9 @@ const MODES = [
 ];
 const workload = computed(() => filters.value.scenario !== "actual");
 const profiles = computed(() => settings.value?.scenarios.profiles ?? QUICK_WORKLOADS);
+const quickList = computed(() =>
+  profiles.value.map((p) => ({ name: p.name, h: p.h, r: p.r, tools: p.tools, label: QUICK_WORKLOADS.find((q) => q.name === p.name)?.label ?? scenarioLabel(p.name) })),
+);
 const same = (a: number, b: number) => Math.abs(a - b) < 1e-6;
 
 function syncScenario(): void {
@@ -27,7 +30,7 @@ function setMode(mode: string): void {
   else syncScenario();
 }
 
-function quick(q: (typeof QUICK_WORKLOADS)[number]): void {
+function quick(q: { h: number; r: number; tools: boolean }): void {
   const f = filters.value;
   f.cache = q.h;
   f.ratio = q.r;
@@ -63,10 +66,14 @@ const actual = computed(() => filters.value.scenario === "actual");
 const label = "text-xs font-medium text-muted-foreground";
 
 function onVolume(e: Event): void {
-  const v = Number((e.target as HTMLInputElement).value);
-  if (v > 0) filters.value.volumeM = v;
+  const input = e.target as HTMLInputElement;
+  const v = Number(input.value);
+  if (Number.isFinite(v) && v > 0) filters.value.volumeM = v;
+  else input.value = String(filters.value.volumeM);
 }
 
+const saved = computed(() => settings.value?.scoring ?? DEFAULT_WEIGHTS);
+const savedLabel = computed(() => `${saved.value.price} / ${saved.value.speed} / ${saved.value.reliability}`);
 const weightsLabel = computed(() => `${filters.value.wPrice} / ${filters.value.wSpeed} / ${filters.value.wReliability}`);
 
 type Ranked = { tag: string; name: string; score: number; rank: number };
@@ -83,7 +90,7 @@ function rank(wp: number, ws: number, wr: number): Ranked[] {
 }
 
 const preview = computed(() => {
-  const base = new Map(rank(DEFAULT_WEIGHTS.price, DEFAULT_WEIGHTS.speed, DEFAULT_WEIGHTS.reliability).map((e) => [e.tag, e.rank]));
+  const base = new Map(rank(saved.value.price, saved.value.speed, saved.value.reliability).map((e) => [e.tag, e.rank]));
   const f = filters.value;
   return rank(f.wPrice, f.wSpeed, f.wReliability)
     .slice(0, 5)
@@ -120,8 +127,11 @@ const previewModel = computed(() => overview.value?.models[0]?.name ?? "");
         />
         <span class="whitespace-nowrap pl-1 pr-2.5 text-xs text-muted-foreground">M in / day</span>
       </div>
+      <span v-if="actual" class="text-xs text-muted-foreground">using real volume of the last {{ settings?.usageWindowDays ?? 7 }} days</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <span :class="label">Period</span>
       <Segmented v-model="days" :options="DAY_OPTIONS" />
-      <span v-if="actual" class="text-xs text-muted-foreground">using real 7-day volume</span>
     </div>
     <div v-if="workload" class="flex basis-full flex-wrap items-center gap-x-5 gap-y-2">
       <div class="flex items-center gap-1.5">
@@ -138,7 +148,7 @@ const previewModel = computed(() => overview.value?.models[0]?.name ?? "");
       </button>
       <div class="flex items-center gap-1 text-xs text-muted-foreground">
         <span class="mr-0.5">Quick:</span>
-        <template v-for="(q, i) in QUICK_WORKLOADS" :key="q.name">
+        <template v-for="(q, i) in quickList" :key="q.name">
           <span v-if="i > 0">·</span>
           <button type="button" :class="['rounded px-1 hover:text-foreground', filters.scenario === q.name && 'font-semibold text-foreground']" @click="quick(q)">{{ q.label }}</button>
         </template>
@@ -171,7 +181,7 @@ const previewModel = computed(() => overview.value?.models[0]?.name ?? "");
       </div>
       <div class="flex items-center gap-2">
         <span :class="label">Min uptime</span>
-        <RangeSlider v-model="filters.minUptime" class="w-24" :min="90" :max="100" :step="0.5" />
+        <RangeSlider v-model="filters.minUptime" class="w-24" :min="uptimeFloor" :max="100" :step="0.5" />
         <span class="tnum w-10 text-[12.5px]">{{ filters.minUptime }}%</span>
       </div>
       <div class="flex items-center gap-2">
@@ -179,7 +189,13 @@ const previewModel = computed(() => overview.value?.models[0]?.name ?? "");
         <span class="text-[12.5px]">Hide banned</span>
       </div>
     </div>
-    <div class="ml-auto">
+    <div class="ml-auto flex items-center gap-2">
+      <div v-if="viewDiffers" class="flex h-8 items-center gap-1.5 rounded-lg bg-warn-bg px-2.5 text-xs text-warn" title="Quant, uptime, ZDR and weights here only change this view. Presets, auto-sync and scheduled bans use the saved rules.">
+        <span class="font-medium">View differs from saved rules</span>
+        <button type="button" :disabled="savingDefaults" class="font-semibold underline underline-offset-[3px] disabled:cursor-wait disabled:opacity-60" @click="saveViewAsDefaults">Save as defaults</button>
+        <span>·</span>
+        <button type="button" class="font-semibold underline underline-offset-[3px]" @click="resetViewToSaved">Reset</button>
+      </div>
       <Popover>
         <PopoverTrigger class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-background px-3 text-[13px] font-medium hover:bg-accent">
             <svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -194,21 +210,21 @@ const previewModel = computed(() => overview.value?.models[0]?.name ?? "");
         <PopoverContent align="end" class="flex w-[340px] flex-col gap-3 rounded-[10px] p-3.5">
           <div class="flex items-center justify-between">
             <span class="text-[13px] font-semibold">Efficiency weights</span>
-            <button type="button" class="text-xs text-muted-foreground hover:text-foreground" @click="resetWeights">Reset 60 / 20 / 20</button>
+            <button type="button" class="text-xs text-muted-foreground hover:text-foreground" @click="setWeights(saved)">Reset to saved {{ savedLabel }}</button>
           </div>
           <div class="grid grid-cols-[80px_1fr_36px] items-center gap-2.5 text-[12.5px]">
             <span>Price</span>
-            <RangeSlider v-model="filters.wPrice" :min="0" :max="100" :step="5" />
+            <RangeSlider v-model="filters.wPrice" :min="0" :max="100" :step="1" />
             <span class="tnum text-right">{{ filters.wPrice }}</span>
             <span>Speed</span>
-            <RangeSlider v-model="filters.wSpeed" :min="0" :max="100" :step="5" />
+            <RangeSlider v-model="filters.wSpeed" :min="0" :max="100" :step="1" />
             <span class="tnum text-right">{{ filters.wSpeed }}</span>
             <span>Reliability</span>
-            <RangeSlider v-model="filters.wReliability" :min="0" :max="100" :step="5" />
+            <RangeSlider v-model="filters.wReliability" :min="0" :max="100" :step="1" />
             <span class="tnum text-right">{{ filters.wReliability }}</span>
           </div>
           <div class="flex flex-col gap-1 border-t border-border pt-2.5">
-            <div class="mb-0.5 text-xs text-muted-foreground">Live preview · {{ previewModel }} top 5 (vs default weights)</div>
+            <div class="mb-0.5 text-xs text-muted-foreground">Live preview · top 5 for {{ previewModel }} (vs saved weights)</div>
             <div v-for="p in preview" :key="p.tag" class="tnum grid grid-cols-[18px_1fr_32px_32px] gap-2 text-[12.5px]">
               <span class="text-muted-foreground">{{ p.rank }}</span>
               <span>{{ p.name }}</span>

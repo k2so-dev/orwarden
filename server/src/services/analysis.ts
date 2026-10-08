@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { classifyModel, modelMinQuantRank, quantRank } from "../core/classify.ts";
+import { classifyModel, modelMinQuantization, modelMinQuantRank, quantRank } from "../core/classify.ts";
 import { unitCost } from "../core/cost.ts";
 import { pricePerMillion } from "../core/forecast.ts";
 import type { ProviderState } from "../core/hysteresis.ts";
@@ -7,7 +7,7 @@ import type { Guardrail } from "../core/openrouter.ts";
 import { admissibleCount, optimize, totalCount, violations, type Violation } from "../core/optimizer.ts";
 import type { ClassifiedEndpoint, ClassifiedModel, Issue, ModelInput } from "../core/types.ts";
 import type { Policy, PresetSettings, RunRecord } from "../db.ts";
-import type { Settings } from "../settings.ts";
+import { PRESET_SLUG_RE, type Settings } from "../settings.ts";
 
 export type AppSnapshot = {
   takenAt: string;
@@ -96,9 +96,9 @@ export type ModelView = {
   r: number;
   profile: Profile;
   counts: { ok: number; outlier: number; hardBad: number };
-  presetId: string;
+  presetId: string | null;
   cost: CostTriple;
-  scenarios: ({ name: string; tools: boolean; h: number; r: number } & CostTriple)[];
+  scenarios: ({ name: string; tools: boolean; h: number; r: number; inputPerDay: number } & CostTriple)[];
   endpoints: EndpointView[];
   warnings: Warning[];
 };
@@ -108,6 +108,7 @@ export type Warning = { level: "bad" | "warn"; title: string; text: string };
 export type Overview = {
   takenAt: string;
   horizonDays: number;
+  usageDays: number;
   scenario: { name: string; tokensPerDay: number; tools: boolean | null; h: number | null; r: number | null };
   scenarios: string[];
   summary: { default: number; bans: number; presets: number; riskShare: number };
@@ -124,8 +125,13 @@ export function viewSettings(settings: Settings, q: ViewQuery): Settings {
       ...settings.filters,
       minQuantization: q.minQuantization ?? settings.filters.minQuantization,
       minUptime: q.minUptime ?? settings.filters.minUptime,
+      zdrOnly: q.zdrOnly ?? settings.filters.zdrOnly,
     },
   };
+}
+
+export function hasPreset(input: Pick<ModelInput, "endpoints">): boolean {
+  return new Set(input.endpoints.map((e) => e.provider)).size > 1;
 }
 
 export function scenarioNames(settings: Settings): string[] {
@@ -274,16 +280,70 @@ export function orderedPrice(ranked: ClassifiedEndpoint[], h: number, r: number)
   return weight > 0 ? total / weight : null;
 }
 
+export function servable<T extends { tools: boolean }>(ranked: readonly T[], tools: boolean): T[] {
+  return tools ? ranked.filter((e) => e.tools) : [...ranked];
+}
+
 export function routingShares(model: ClassifiedModel, banned: ReadonlySet<string>, tools: boolean, settings: Settings): Map<ClassifiedEndpoint, number> {
   const live = model.endpoints.filter((e) => !banned.has(e.provider) && (!tools || e.tools));
   const total = live.reduce((s, e) => s + e.weight, 0);
   return new Map(model.endpoints.map((e) => [e, total > 0 && live.includes(e) ? e.weight / total : 0]));
 }
 
-export function presetSlug(model: string, settings: Settings, preset?: PresetSettings): string {
-  if (preset?.slug) return preset.slug;
-  const base = model.split("/").pop()!.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase();
-  return settings.presets.slugPattern.replace("{model}", base);
+const slugPart = (s: string) => s.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase();
+const MAX_SLUG = 63;
+
+function fitSlug(slug: string): string {
+  if (slug.length > MAX_SLUG) {
+    const tail = createHash("sha256").update(slug).digest("hex").slice(0, 6);
+    slug = `${slug.slice(0, MAX_SLUG - 7).replace(/-+$/, "")}-${tail}`;
+  }
+  return PRESET_SLUG_RE.test(slug) ? slug : fitSlug(`preset-${slug.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+/, "")}`);
+}
+
+function applyPattern(settings: Settings, base: string): string {
+  const pattern = settings.presets.slugPattern;
+  return pattern.includes("{model}") ? pattern.replace("{model}", base) : `${base}-${pattern}`;
+}
+
+export function trackedSlugs(models: readonly ModelInput[], settings: Settings, presets: ReadonlyMap<string, PresetSettings>): Map<string, string> {
+  return presetSlugs(models.filter(hasPreset).map((m) => m.slug), settings, presets);
+}
+
+export function legacySlug(model: string, settings: Settings): string {
+  return applyPattern(settings, slugPart(model.split("/").pop()!));
+}
+
+export function presetSlugs(models: readonly string[], settings: Settings, presets: ReadonlyMap<string, PresetSettings>): Map<string, string> {
+  const pattern = (base: string) => applyPattern(settings, base);
+  const short = (m: string) => slugPart(m.split("/").pop()!);
+  const all = [...new Set(models)].sort();
+  const stored = [...presets].sort(([a], [b]) => a.localeCompare(b));
+  const taken = new Set<string>();
+  const out = new Map<string, string>();
+  for (const [m, p] of stored) {
+    if (p.slug && !taken.has(p.slug)) {
+      taken.add(p.slug);
+      out.set(m, p.slug);
+    }
+  }
+  for (const [m, p] of stored) {
+    const legacy = legacySlug(m, settings);
+    if (!out.has(m) && !p.slug && p.syncedAt && !taken.has(legacy)) {
+      taken.add(legacy);
+      out.set(m, legacy);
+    }
+  }
+  const counts = new Map<string, number>();
+  for (const m of all) counts.set(short(m), (counts.get(short(m)) ?? 0) + 1);
+  for (const m of all) {
+    if (out.has(m)) continue;
+    let slug = fitSlug((counts.get(short(m)) ?? 0) > 1 || taken.has(fitSlug(pattern(short(m)))) ? pattern(slugPart(m)) : pattern(short(m)));
+    for (let n = 2; taken.has(slug); n++) slug = fitSlug(pattern(`${slugPart(m)}-${n}`));
+    taken.add(slug);
+    out.set(m, slug);
+  }
+  return new Map(all.map((m) => [m, out.get(m)!]));
 }
 
 export function allowedQuantizations(slug: string, settings: Settings): string[] {
@@ -291,33 +351,69 @@ export function allowedQuantizations(slug: string, settings: Settings): string[]
   return QUANT_NAMES.filter((q) => quantRank(q) >= min);
 }
 
-export function presetConfig(model: ClassifiedModel, ranked: ClassifiedEndpoint[], profile: Profile, settings: Settings) {
+export function presetConfig(model: ClassifiedModel, ranked: readonly Pick<ClassifiedEndpoint, "tag" | "quantization">[], profile: Pick<Profile, "tools">, settings: Settings) {
   const tags = ranked.map((e) => e.tag);
+  const standard = ranked.every((e) => QUANT_NAMES.includes(e.quantization.toLowerCase()));
   return {
     model: model.slug,
     provider: {
       order: tags,
       only: tags,
       allow_fallbacks: true,
-      ...(model.openWeights !== false ? { quantizations: allowedQuantizations(model.slug, settings) } : {}),
+      ...(model.openWeights !== false && standard ? { quantizations: allowedQuantizations(model.slug, settings) } : {}),
       ...(profile.tools ? { require_parameters: true } : {}),
     },
   };
 }
 
-export function configHash(config: unknown): string {
-  const stable = (v: unknown): unknown =>
-    Array.isArray(v)
-      ? v.map(stable)
-      : v && typeof v === "object"
-        ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([k, x]) => [k, stable(x)]))
-        : v;
-  return createHash("sha256").update(JSON.stringify(stable(config))).digest("hex").slice(0, 16);
+const WATCHED_PROVIDER_KEYS: Record<string, unknown> = { ignore: null, sort: null, max_price: null, data_collection: "allow", zdr: false };
+const isSet = (v: unknown) =>
+  v !== null &&
+  v !== undefined &&
+  v !== false &&
+  v !== "" &&
+  !(Array.isArray(v) && v.length === 0) &&
+  !(typeof v === "object" && !Array.isArray(v) && Object.keys(v).length === 0);
+
+function watched(provider: Record<string, unknown>) {
+  return Object.entries(WATCHED_PROVIDER_KEYS)
+    .filter(([k, fallback]) => isSet(provider[k]) && provider[k] !== fallback)
+    .map(([k]) => [k, JSON.stringify(provider[k])]);
+}
+
+function hashable(config: Record<string, unknown>) {
+  const p = (config.provider ?? {}) as Record<string, unknown>;
+  const list = (v: unknown) => (Array.isArray(v) ? v.map(String) : null);
+  return {
+    model: config.model ?? null,
+    order: list(p.order) ?? [],
+    only: [...new Set(list(p.only) ?? [])].sort(),
+    fallbacks: p.allow_fallbacks !== false,
+    quantizations: list(p.quantizations)?.length ? list(p.quantizations)!.map((q) => q.toLowerCase()).sort() : null,
+    parameters: p.require_parameters === true,
+    edits: watched(p),
+  };
+}
+
+export function configHash(config: Record<string, unknown>): string {
+  return createHash("sha256").update(JSON.stringify(hashable(config))).digest("hex").slice(0, 16);
+}
+
+const WRITTEN_PROVIDER_KEYS = new Set(["order", "only", "allow_fallbacks", "quantizations", "require_parameters"]);
+
+export function remoteEdits(version: { config?: Record<string, unknown>; system_prompt?: string | null } | null | undefined): string[] {
+  const config = version?.config;
+  if (!config) return ["unreadable config"];
+  const provider = (config.provider ?? {}) as Record<string, unknown>;
+  const out = watched(provider).map(([k]) => k!);
+  for (const [k, v] of Object.entries(provider)) if (!WRITTEN_PROVIDER_KEYS.has(k) && !(k in WATCHED_PROVIDER_KEYS) && isSet(v)) out.push(k);
+  for (const [k, v] of Object.entries(config)) if (k !== "model" && k !== "provider" && isSet(v)) out.push(k);
+  if (isSet(version?.system_prompt)) out.push("system_prompt");
+  return out;
 }
 
 export function remoteConfigHash(config: Record<string, unknown> | undefined): string | null {
-  if (!config) return null;
-  return configHash({ model: config.model, provider: config.provider });
+  return config ? configHash(config) : null;
 }
 
 type Ctx = {
@@ -332,50 +428,124 @@ type ModelCalc = {
   model: ClassifiedModel;
   profile: Profile;
   scores: Map<ClassifiedEndpoint, Scores>;
+  pool: ClassifiedEndpoint[];
   ranked: ClassifiedEndpoint[];
   shares: Map<ClassifiedEndpoint, number>;
 };
 
-function calcModel(input: ModelInput, ctx: Ctx, vs: Settings, current: Set<string>, desired: Set<string>): ModelCalc {
-  const model = classifyModel(input, vs);
-  const profile = resolveProfile(input, ctx.settings, ctx.q);
-  const zdrOnly = ctx.q.zdrOnly ?? false;
-  const weights = {
-    price: ctx.q.wPrice ?? ctx.settings.scoring.price,
-    speed: ctx.q.wSpeed ?? ctx.settings.scoring.speed,
-    reliability: ctx.q.wReliability ?? ctx.settings.scoring.reliability,
-    unknownQuantPenalty: ctx.settings.scoring.unknownQuantPenalty,
+type Basis = {
+  settings: Settings;
+  q: ViewQuery;
+  zdrOnly: boolean;
+  weights: { price: number; speed: number; reliability: number; unknownQuantPenalty: number };
+};
+
+function viewBasis(ctx: Ctx): Basis {
+  const vs = viewSettings(ctx.settings, ctx.q);
+  return {
+    settings: vs,
+    q: ctx.q,
+    zdrOnly: vs.filters.zdrOnly,
+    weights: {
+      price: ctx.q.wPrice ?? ctx.settings.scoring.price,
+      speed: ctx.q.wSpeed ?? ctx.settings.scoring.speed,
+      reliability: ctx.q.wReliability ?? ctx.settings.scoring.reliability,
+      unknownQuantPenalty: ctx.settings.scoring.unknownQuantPenalty,
+    },
   };
-  const pool = model.endpoints.filter((e) => isEligible(e, profile, desired, zdrOnly));
-  const scores = scoreEndpoints(model.endpoints, profile, pool, weights);
-  const ranked = rankForPreset(model, profile, desired, scores, ctx.presets.get(model.slug), ctx.settings.presets.topN, zdrOnly, ctx.settings.presets.rankBy);
-  return { model, profile, scores, ranked, shares: routingShares(model, current, profile.tools, ctx.settings) };
 }
 
-function costs(calc: ModelCalc, current: Set<string>, desired: Set<string>, h: number, r: number, tools: boolean, perDay: number, days: number, settings: Settings): CostTriple {
-  const toMoney = (perM: number | null) => (perM === null ? null : (perM * perDay * days) / 1_000_000);
+export function presetBasis(ctx: Ctx, model: string): Basis {
+  const { settings } = ctx;
+  const scenario = ctx.presets.get(model)?.scenario ?? settings.presets.defaultScenario;
+  return {
+    settings,
+    q: { scenario },
+    zdrOnly: settings.filters.zdrOnly,
+    weights: { ...settings.scoring },
+  };
+}
+
+function calcModel(input: ModelInput, ctx: Ctx, basis: Basis, current: Set<string>, desired: Set<string>): ModelCalc {
+  const model = classifyModel(input, basis.settings);
+  const profile = resolveProfile(input, ctx.settings, basis.q);
+  const pool = model.endpoints.filter((e) => isEligible(e, profile, desired, basis.zdrOnly));
+  const scores = scoreEndpoints(model.endpoints, profile, pool, basis.weights);
+  const ranked = rankForPreset(model, profile, desired, scores, ctx.presets.get(model.slug), ctx.settings.presets.topN, basis.zdrOnly, ctx.settings.presets.rankBy);
+  return { model, profile, scores, pool, ranked, shares: routingShares(model, current, profile.tools, ctx.settings) };
+}
+
+function costs(model: ClassifiedModel, ranked: ClassifiedEndpoint[] | null, current: Set<string>, desired: Set<string>, p: Pick<Profile, "h" | "r" | "tools" | "inputPerDay">, days: number, settings: Settings): CostTriple {
+  const toMoney = (perM: number | null) => (perM === null ? null : (perM * p.inputPerDay * days) / 1_000_000);
   const mode = settings.optimizer.routingPrice;
   return {
-    default: toMoney(pricePerMillion(calc.model, current, h, r, tools, mode).price),
-    bans: toMoney(pricePerMillion(calc.model, desired, h, r, tools, mode).price),
-    preset: toMoney(orderedPrice(calc.ranked, h, r)),
+    default: toMoney(pricePerMillion(model, current, p.h, p.r, p.tools, mode).price),
+    bans: toMoney(pricePerMillion(model, desired, p.h, p.r, p.tools, mode).price),
+    preset: ranked ? toMoney(orderedPrice(servable(ranked, p.tools), p.h, p.r)) : null,
   };
+}
+
+function emptyWarning(calc: ModelCalc, banned: ReadonlySet<string>, zdrOnly: boolean, qualityTitle: string, multi: boolean, scope: "preset" | "view"): Warning {
+  const good = calc.model.endpoints.filter((e) => e.cls === "ok");
+  const quantOk = calc.model.endpoints.some((e) => e.quant === "ok" || e.quant === "closed");
+  const workload = scope === "preset" ? "the preset workload" : "the selected workload";
+  const rules = scope === "preset" ? "the saved rules require" : "ZDR-only requires";
+  if (good.length === 0) {
+    const text =
+      scope === "preset" ? "No endpoint passes the saved quality rules, so a safe preset cannot be built." : multi ? "No endpoint passes the quality rules in this view." : "The only provider fails the quality rules.";
+    return { level: "bad", title: quantOk ? "No provider passes the quality rules." : qualityTitle, text };
+  }
+  const allowed = good.filter((e) => !banned.has(e.provider));
+  if (allowed.length === 0) return { level: "bad", title: "All good providers are banned.", text: "Every endpoint that passes the quality rules belongs to a globally banned provider." };
+  const tooled = allowed.filter((e) => !calc.profile.tools || e.tools);
+  if (tooled.length === 0) {
+    return { level: "bad", title: "No tool-capable provider.", text: multi ? `No endpoint that passes the rules supports tools, which ${workload} requires.` : `The only provider does not support tools, which ${workload} requires.` };
+  }
+  if (zdrOnly && !tooled.some((e) => e.zdr)) {
+    return { level: "bad", title: "No ZDR provider.", text: multi ? `No endpoint that passes the rules offers zero data retention, which ${rules}.` : `The only provider does not offer zero data retention, which ${rules}.` };
+  }
+  return { level: "bad", title: "No eligible provider.", text: "No endpoint passes the rules." };
+}
+
+function presetBlocker(input: ModelInput, calc: ModelCalc, banned: ReadonlySet<string>, zdrOnly: boolean, settings: Settings): Warning | null {
+  if (calc.ranked.length > 0) return null;
+  if (calc.pool.length > 0) return { level: "bad", title: "Every eligible provider is excluded.", text: "All endpoints that pass the rules are excluded from this preset." };
+  return emptyWarning(calc, banned, zdrOnly, qualityTitle(input, settings), true, "preset");
+}
+
+function qualityTitle(input: ModelInput, settings: Settings): string {
+  return input.openWeights !== false ? `No ${modelMinQuantization(input.slug, settings)}+ provider.` : "No eligible provider.";
+}
+
+export function remoteForeign(remote: RemotePreset | undefined, model: string, syncedAt: string | null | undefined): boolean {
+  if (!remote) return false;
+  return !syncedAt || remote.model !== model;
+}
+
+export function remoteMatches(remote: RemotePreset | undefined, syncedHash: string | null | undefined, hash: string): boolean {
+  return !!remote && (remote.hash === hash || (remote.hash === null && syncedHash === hash));
 }
 
 export function buildOverview(ctx: Ctx): Overview {
   const { snapshot, settings, q } = ctx;
-  const vs = viewSettings(settings, q);
+  const view = viewBasis(ctx);
   const days = q.days ?? settings.scenarios.days;
   const current = currentBans(snapshot);
   const desired = desiredBans(ctx.bans);
+  const slugs = trackedSlugs(snapshot.models, settings, ctx.presets);
   const summary = { default: 0, bans: 0, presets: 0, riskShare: 0 };
   let riskVolume = 0;
   let volume = 0;
 
   const models: ModelView[] = snapshot.models.map((input) => {
-    const calc = calcModel(input, ctx, vs, current, desired);
-    const { model, profile, scores, ranked, shares } = calc;
-    const cost = costs(calc, current, desired, profile.h, profile.r, profile.tools, profile.inputPerDay, days, settings);
+    const calc = calcModel(input, ctx, view, current, desired);
+    const { model, profile, scores, pool, shares } = calc;
+    const basis = presetBasis(ctx, input.slug);
+    const basisCalc = calcModel(input, ctx, basis, current, desired);
+    const presetCalc = hasPreset(input) ? basisCalc : null;
+    const presetRanked = presetCalc?.ranked ?? null;
+    const presetRank = new Map((presetRanked ?? []).map((e, i) => [basisCalc.model.endpoints.indexOf(e), i + 1]));
+    const cost = costs(model, presetRanked, current, desired, profile, days, settings);
     summary.default += cost.default ?? 0;
     summary.bans += cost.bans ?? 0;
     summary.presets += cost.preset ?? cost.bans ?? 0;
@@ -383,14 +553,13 @@ export function buildOverview(ctx: Ctx): Overview {
     riskVolume += risky * profile.inputPerDay;
     volume += profile.inputPerDay;
 
-    const eligibleCosts = ranked.map((e) => unitCost(e, profile.h, profile.r));
+    const eligibleCosts = pool.map((e) => unitCost(e, profile.h, profile.r));
     const best = eligibleCosts.length ? Math.min(...eligibleCosts) : null;
     const quantOk = model.endpoints.filter((e) => e.quant === "ok" || e.quant === "closed");
     const medOut = median((quantOk.length ? quantOk : model.endpoints).map((e) => e.pOut));
     const endpoints = model.endpoints
-      .map((e): EndpointView => {
+      .map((e, i): EndpointView => {
         const costPerM = unitCost(e, profile.h, profile.r);
-        const rank = ranked.indexOf(e);
         return {
           tag: e.tag,
           provider: e.provider,
@@ -417,8 +586,8 @@ export function buildOverview(ctx: Ctx): Overview {
           verdict: e.cls,
           reasons: e.reasons,
           issues: e.issues,
-          eligible: isEligible(e, profile, desired, q.zdrOnly ?? false),
-          presetRank: rank >= 0 ? rank + 1 : null,
+          eligible: isEligible(e, profile, desired, view.zdrOnly),
+          presetRank: presetRank.get(i) ?? null,
           ban: banStatus(e.provider, ctx.bans, current, desired, settings),
         };
       })
@@ -430,16 +599,16 @@ export function buildOverview(ctx: Ctx): Overview {
       ...settings.scenarios.profiles.map((p) => ({ name: p.name, tools: p.tools, h: p.h, r: p.r })),
     ].map((s) => {
       const p = resolveProfile(input, settings, { ...q, scenario: s.name });
-      const sCalc = s.name === profile.name ? calc : { ...calc, ranked: rankForPreset(model, p, desired, scoreEndpoints(model.endpoints, p, model.endpoints.filter((e) => isEligible(e, p, desired, q.zdrOnly ?? false)), settings.scoring), ctx.presets.get(model.slug), settings.presets.topN, q.zdrOnly ?? false, settings.presets.rankBy) };
-      return { ...s, ...costs(sCalc, current, desired, p.h, p.r, p.tools, p.inputPerDay, days, settings) };
+      return { ...s, h: p.h, r: p.r, tools: p.tools, inputPerDay: p.inputPerDay, ...costs(model, presetRanked, current, desired, p, days, settings) };
     });
 
     const warnings: Warning[] = [];
     const k = settings.optimizer.minEndpointsPerModel;
-    const minQuant = vs.filters.minQuantization;
-    if (ranked.length === 0) {
-      warnings.push({ level: "bad", title: input.openWeights !== false ? `No ${minQuant}+ provider.` : "No eligible provider.", text: "No endpoint passes the quality rules, so a safe preset cannot be built." });
-    } else if (admissibleCount(model, desired) < Math.min(k, admissibleCount(model, new Set()))) {
+    const blocker = presetCalc ? presetBlocker(input, presetCalc, desired, basis.zdrOnly, settings) : null;
+    const viewBlocker = pool.length === 0 ? emptyWarning(calc, desired, view.zdrOnly, qualityTitle(input, view.settings), presetCalc !== null, "view") : null;
+    if (blocker) warnings.push(blocker);
+    if (viewBlocker && viewBlocker.title !== blocker?.title) warnings.push(viewBlocker);
+    if (!blocker && !viewBlocker && admissibleCount(model, desired) < Math.min(k, admissibleCount(model, new Set()))) {
       warnings.push({ level: "warn", title: `Fewer than ${k} good providers.`, text: "Global bans leave too few good endpoints for this model." });
     }
     if (totalCount(model, desired) === 0) warnings.push({ level: "bad", title: "No providers left.", text: "Global bans remove every endpoint of this model." });
@@ -459,7 +628,7 @@ export function buildOverview(ctx: Ctx): Overview {
         outlier: model.endpoints.filter((e) => e.cls === "outlier").length,
         hardBad: model.endpoints.filter((e) => e.cls === "hard-bad").length,
       },
-      presetId: `@preset/${presetSlug(model.slug, settings, ctx.presets.get(model.slug))}`,
+      presetId: presetCalc ? `@preset/${slugs.get(model.slug)!}` : null,
       cost,
       scenarios: scenarioRows,
       endpoints,
@@ -473,6 +642,7 @@ export function buildOverview(ctx: Ctx): Overview {
   return {
     takenAt: snapshot.takenAt,
     horizonDays: days,
+    usageDays: settings.usageWindowDays,
     scenario: {
       name: q.scenario,
       tokensPerDay: q.tokensPerDay ?? settings.scenarios.inputTokensPerDay,
@@ -596,7 +766,7 @@ export function buildProviders(ctx: Ctx): ProvidersView {
   };
 }
 
-export type RemotePreset = { hash: string | null; version: number | null; updatedAt: string | null } | null;
+export type RemotePreset = { hash: string | null; model: string | null; edits: string[]; version: number | null; updatedAt: string | null } | null;
 
 export type PresetEndpoint = {
   rank: number;
@@ -642,32 +812,42 @@ export type PresetView = {
   scenarios: PresetScenario[];
   config: ReturnType<typeof presetConfig>;
   hash: string;
-  status: "empty" | "not-created" | "up-to-date" | "out-of-date" | "unknown";
+  status: "empty" | "not-created" | "up-to-date" | "out-of-date" | "foreign" | "unknown";
   remote: RemotePreset;
   syncedAt: string | null;
+  blocker: Warning | null;
 };
 
 export function buildPresets(ctx: Ctx, remote: ReadonlyMap<string, RemotePreset>): PresetView[] {
   const { snapshot, settings, q } = ctx;
-  const vs = viewSettings(settings, q);
   const days = q.days ?? settings.scenarios.days;
   const current = currentBans(snapshot);
   const desired = desiredBans(ctx.bans);
+  const slugs = trackedSlugs(snapshot.models, settings, ctx.presets);
   return snapshot.models
-    .filter((m) => new Set(m.endpoints.map((e) => e.provider)).size > 1)
+    .filter(hasPreset)
     .map((input) => {
       const preset = ctx.presets.get(input.slug);
-      const scenario = preset?.scenario ?? (q.scenario || settings.presets.defaultScenario);
-      const calc = calcModel(input, { ...ctx, q: { ...q, scenario } }, vs, current, desired);
-      const { model, profile, ranked, scores } = calc;
-      const slug = presetSlug(model.slug, settings, preset);
+      const basis = presetBasis(ctx, input.slug);
+      const calc = calcModel(input, ctx, basis, current, desired);
+      const { model, profile, ranked, scores, pool: eligible } = calc;
+      const slug = slugs.get(model.slug)!;
       const config = presetConfig(model, ranked, profile, settings);
       const hash = configHash(config);
-      const money = costs(calc, current, desired, profile.h, profile.r, profile.tools, profile.inputPerDay, days, settings);
+      const money = costs(model, ranked, current, desired, profile, days, settings);
       const r = remote.has(slug) ? remote.get(slug)! : undefined;
       const status: PresetView["status"] =
-        ranked.length === 0 ? "empty" : r === undefined ? "unknown" : r === null ? "not-created" : r.hash === hash || preset?.syncedHash === hash ? "up-to-date" : "out-of-date";
-      const eligible = model.endpoints.filter((e) => isEligible(e, profile, desired, q.zdrOnly ?? false));
+        ranked.length === 0
+          ? "empty"
+          : r === undefined
+            ? "unknown"
+            : r === null
+              ? "not-created"
+              : remoteMatches(r, preset?.syncedHash, hash)
+                ? "up-to-date"
+                : remoteForeign(r, model.slug, preset?.syncedAt)
+                  ? "foreign"
+                  : "out-of-date";
       const cheapestEp = eligible.reduce<ClassifiedEndpoint | null>((best, e) => (!best || unitCost(e, profile.h, profile.r) < unitCost(best, profile.h, profile.r) ? e : best), null);
       const cheapestCost = cheapestEp ? unitCost(cheapestEp, profile.h, profile.r) : null;
       const shares = orderedShares(ranked);
@@ -678,7 +858,7 @@ export function buildPresets(ctx: Ctx, remote: ReadonlyMap<string, RemotePreset>
         { name: DEFAULT_SCENARIO, tools: false },
         ...settings.scenarios.profiles.map((p) => ({ name: p.name, tools: p.tools })),
       ].map((sc) => {
-        const p = resolveProfile(input, settings, { ...q, scenario: sc.name });
+        const p = resolveProfile(input, settings, { scenario: sc.name });
         return {
           name: sc.name,
           h: p.h,
@@ -686,7 +866,7 @@ export function buildPresets(ctx: Ctx, remote: ReadonlyMap<string, RemotePreset>
           tools: p.tools,
           inputPerDay: p.inputPerDay,
           default: toMoney(pricePerMillion(model, current, p.h, p.r, p.tools, mode).price, p.inputPerDay),
-          preset: toMoney(orderedPrice(ranked, p.h, p.r), p.inputPerDay),
+          preset: toMoney(orderedPrice(servable(ranked, p.tools), p.h, p.r), p.inputPerDay),
         };
       });
       return {
@@ -728,7 +908,7 @@ export function buildPresets(ctx: Ctx, remote: ReadonlyMap<string, RemotePreset>
         eligibleCount: eligible.length,
         policy: {
           quantizations: config.provider.quantizations ?? [],
-          minQuantization: model.openWeights !== false ? vs.filters.minQuantization : null,
+          minQuantization: model.openWeights !== false ? modelMinQuantization(model.slug, settings) : null,
           zdr: ranked.length > 0 && ranked.every((e) => e.zdr),
           tools: profile.tools,
           fallbacks: true,
@@ -749,6 +929,7 @@ export function buildPresets(ctx: Ctx, remote: ReadonlyMap<string, RemotePreset>
         status,
         remote: r ?? null,
         syncedAt: preset?.syncedAt ?? null,
+        blocker: presetBlocker(input, calc, desired, basis.zdrOnly, settings),
       };
     });
 }

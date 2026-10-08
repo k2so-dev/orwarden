@@ -6,7 +6,7 @@ import type { EndpointView, HistoryPoint, ModelView } from "@/lib/api";
 import { money, pct, periodLabel, price, seconds, uptime, volume } from "@/lib/format";
 import { TONE_CLASS, verdictBadge, type TipLine } from "@/lib/issues";
 import { cn } from "@/lib/utils";
-import { SCENARIOS, filters } from "@/stores/filters";
+import { filters, scenarioLabel } from "@/stores/filters";
 import { overview, settings } from "@/stores/data";
 import { hideTip, showTip } from "@/stores/tip";
 
@@ -103,17 +103,16 @@ const vsText = computed(() => {
 const horizonDays = computed(() => overview.value?.horizonDays ?? 7);
 const scenarioCosts = computed(() => {
   const r = props.row;
-  const perDay = props.model.profile.inputPerDay;
   return props.model.scenarios
     .filter((s) => s.name !== "actual")
     .map((s) => {
       const perM = (1 - s.h) * r.pIn + s.h * r.pCache + s.r * r.pOut;
       return {
         name: s.name,
-        label: SCENARIOS.find((x) => x.value === s.name)?.label ?? s.name,
+        label: `${scenarioLabel(s.name)} · ${volume(s.inputPerDay)}/day`,
         current: s.name === overview.value?.scenario.name,
         perM,
-        horizon: (perM * perDay * horizonDays.value) / 1_000_000,
+        horizon: (perM * s.inputPerDay * horizonDays.value) / 1_000_000,
       };
     });
 });
@@ -198,7 +197,7 @@ const cell = "px-2.5 text-right";
   <div v-if="open" class="w-max min-w-full border-b border-border bg-muted">
     <div class="sticky left-0 grid w-[min(1120px,calc(100vw-90px))] grid-cols-[1.1fr_.9fr_1.2fr] gap-6 whitespace-normal py-3.5 pl-12 pr-4">
       <div>
-        <div class="mb-1.5 text-xs font-semibold">Cost by scenario <span class="font-normal text-muted-foreground">· {{ volume(model.profile.inputPerDay) }} in/day</span></div>
+        <div class="mb-1.5 text-xs font-semibold">Cost by scenario</div>
         <div class="tnum grid grid-cols-[1fr_auto_auto] gap-x-[18px] gap-y-1 text-[12.5px]">
           <span class="text-[11.5px] text-muted-foreground">Scenario</span>
           <span class="text-right text-[11.5px] text-muted-foreground">per 1M in</span>

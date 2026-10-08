@@ -1,5 +1,6 @@
 <script setup lang="ts" vapor>
 import { onMounted } from "vue";
+import ConfirmDialog from "@/components/app/ConfirmDialog.vue";
 import FloatTip from "@/components/app/FloatTip.vue";
 import Toasts from "@/components/app/Toasts.vue";
 import { authenticated, checkSession, loadAll } from "@/stores/data";
@@ -16,4 +17,5 @@ onMounted(async () => {
   <Shell v-else-if="authenticated === true" />
   <FloatTip />
   <Toasts />
+  <ConfirmDialog />
 </template>

@@ -63,10 +63,11 @@ export const viewQuery = computed<ViewQuery>(() => {
   return q as unknown as ViewQuery;
 });
 
-export function resetWeights(): void {
-  filters.value.wPrice = DEFAULT_WEIGHTS.price;
-  filters.value.wSpeed = DEFAULT_WEIGHTS.speed;
-  filters.value.wReliability = DEFAULT_WEIGHTS.reliability;
+export function setWeights(w: { price: number; speed: number; reliability: number }): void {
+  const clamp = (v: number) => Math.min(100, Math.max(0, v));
+  filters.value.wPrice = clamp(w.price);
+  filters.value.wSpeed = clamp(w.speed);
+  filters.value.wReliability = clamp(w.reliability);
 }
 
 export const CONTEXT_TAGS = [

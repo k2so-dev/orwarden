@@ -7,6 +7,7 @@ import Segmented from "@/components/app/Segmented.vue";
 import StatusBadge from "@/components/app/StatusBadge.vue";
 import Tip from "@/components/app/Tip.vue";
 import { act, dryRun, loadSettings, logout, refreshNow, refreshing, status } from "@/stores/data";
+import { confirmAction } from "@/stores/confirm";
 import { settingsOpen, theme, toggleTheme } from "@/stores/ui";
 
 const MODES = [
@@ -14,13 +15,30 @@ const MODES = [
   { value: "apply", label: "Apply" },
 ];
 
+async function setMode(value: string): Promise<void> {
+  if (value === (dryRun.value ? "dry-run" : "apply")) return;
+  if (value === "apply") {
+    const ok = await confirmAction(
+      "Switch to Apply?",
+      "Write buttons, scheduled bans and preset auto-sync will change the guardrail and presets on OpenRouter for every app in this workspace.",
+      "Switch to Apply",
+    );
+    if (!ok) return;
+  }
+  await act(
+    async () => {
+      await unwrap(client.settings.$put({ json: { mode: value } }));
+      await loadSettings();
+    },
+    value === "apply" ? "Apply mode on" : "Dry-run mode on",
+    value === "apply" ? "Writes go to OpenRouter" : "Nothing is written to OpenRouter",
+  );
+}
+
 const mode = computed({
   get: () => (dryRun.value ? "dry-run" : "apply"),
   set: (value: string) => {
-    void act(async () => {
-      await unwrap(client.settings.$put({ json: { mode: value } }));
-      await loadSettings();
-    });
+    void setMode(value);
   },
 });
 

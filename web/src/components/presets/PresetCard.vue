@@ -9,30 +9,23 @@ import { copy } from "@/lib/clipboard";
 import { dateTime, money, pct, periodLabel, price, signedMoney, signedPct, uptime } from "@/lib/format";
 import type { TipLine, Tone } from "@/lib/issues";
 import { TONE_CLASS } from "@/lib/issues";
+import { presetStatus } from "@/lib/presetStatus";
 import { cn } from "@/lib/utils";
-import { act, dryRun, previewOnly, reloadAfterWrite } from "@/stores/data";
-import { scenarioLabel, viewQuery } from "@/stores/filters";
+import { act, dryRun, presetsFailed, reloadAfterWrite, writeBlocked } from "@/stores/data";
+import { scenarioLabel } from "@/stores/filters";
+import { confirmAction } from "@/stores/confirm";
 import { notify } from "@/stores/toast";
 
 type Row = PresetView["ranked"][number];
 
 const props = defineProps<{ preset: PresetView }>();
 
-const status = computed(() => (props.preset.status === "unknown" ? "not-created" : props.preset.status));
-const STATUS: Record<string, { kind: BadgeKind; text: string }> = {
-  "up-to-date": { kind: "ok", text: "Up to date" },
-  "out-of-date": { kind: "warn", text: "Out of date" },
-  "not-created": { kind: "mute", text: "Not created" },
-  empty: { kind: "bad", text: "Cannot build" },
-};
-const badge = computed(() => STATUS[status.value]!);
-const note = computed(() => {
-  const p = props.preset;
-  if (status.value === "up-to-date") return p.syncedAt ? `Synced ${dateTime(p.syncedAt, ", ")} · matches current ranking` : "Matches current ranking";
-  if (status.value === "out-of-date") return "Provider order changed since last sync";
-  if (status.value === "empty") return "No eligible endpoints";
-  return "Not on OpenRouter yet";
-});
+const status = computed(() => props.preset.status);
+const badge = computed(() => presetStatus(props.preset));
+const note = computed(() =>
+  status.value === "up-to-date" && props.preset.syncedAt ? `Synced ${dateTime(props.preset.syncedAt, ", ")} · matches the saved ranking` : badge.value.tip,
+);
+const copyable = computed(() => badge.value.copyable && !presetsFailed.value);
 
 const blocked = computed(() => status.value === "empty");
 const min = computed(() => props.preset.policy.minQuantization);
@@ -114,7 +107,7 @@ const scenarios = computed(() =>
 const policies = computed(() => {
   const p = props.preset.policy;
   return [
-    ...(min.value ? [`${min.value}+ only`] : []),
+    ...(min.value && p.quantizations.length > 0 ? [`${min.value}+ only`] : []),
     ...(p.zdr ? ["ZDR"] : []),
     ...(p.fallbacks ? ["fallbacks within list"] : []),
     ...(p.tools ? ["tools required"] : []),
@@ -133,12 +126,44 @@ const actionLabel = computed(() => {
   if (dryRun.value) return "Preview";
   if (status.value === "not-created") return "Create preset";
   if (status.value === "out-of-date") return "Update preset";
+  if (status.value === "foreign") return "Overwrite preset";
+  if (status.value === "unknown") return "Sync preset";
+  if (!props.preset.syncedAt) return "Pin preset";
   return "Re-sync";
 });
 
-async function patch(body: { autoSync?: boolean; pinned?: string[] }) {
+async function patch(body: { autoSync?: boolean; pinned?: string[]; slug?: string }) {
   const res = await act(() => unwrap(client.presets.settings.$put({ json: { model: props.preset.model, ...body } })));
   if (res) await reloadAfterWrite();
+  return res !== null;
+}
+
+const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,62}$/;
+const renaming = ref(false);
+const slugDraft = ref("");
+const slugValid = computed(() => SLUG_RE.test(slugDraft.value.trim()));
+
+function startRename() {
+  slugDraft.value = props.preset.slug;
+  renaming.value = true;
+}
+
+async function rename() {
+  const slug = slugDraft.value.trim();
+  if (!SLUG_RE.test(slug)) return;
+  if (slug === props.preset.slug) {
+    renaming.value = false;
+    return;
+  }
+  if (props.preset.syncedAt) {
+    const ok = await confirmAction(
+      `Rename to @preset/${slug}?`,
+      `@preset/${props.preset.slug} stays on OpenRouter but is no longer updated from here. Clients must switch to the new id after you sync it.`,
+      "Rename",
+    );
+    if (!ok) return;
+  }
+  if (await patch({ slug })) renaming.value = false;
 }
 
 function togglePin(tag: string) {
@@ -147,14 +172,42 @@ function togglePin(tag: string) {
 }
 
 async function sync() {
+  if (dryRun.value) {
+    jsonOpen.value = true;
+    notify("Preview only", `Dry-run: this config would be written to @preset/${props.preset.slug}. Nothing was sent.`, "info");
+    return;
+  }
+  const edits = props.preset.remote?.edits ?? [];
+  const removes = edits.length > 0 ? ` Syncing writes a new version with only model and provider routing, so these settings may be lost: ${edits.join(", ")}.` : "";
+  const foreign = status.value === "foreign";
+  const unchecked = status.value === "unknown";
+  if (unchecked) {
+    const ok = await confirmAction(
+      `Write @preset/${props.preset.slug} without checking?`,
+      "OpenRouter did not return the current preset, so edits made there or another model using this slug cannot be detected. Syncing replaces whatever is there.",
+      "Write anyway",
+    );
+    if (!ok) return;
+  } else if (foreign || edits.length > 0) {
+    const ok = await confirmAction(
+      foreign ? `Overwrite @preset/${props.preset.slug}?` : `Replace edits on @preset/${props.preset.slug}?`,
+      foreign
+        ? `${props.preset.remote?.model && props.preset.remote.model !== props.preset.model ? `This preset on OpenRouter routes ${props.preset.remote.model}. Clients using it will switch to ${props.preset.model}.` : "This preset on OpenRouter was not created from here and has a different provider list. Clients using it will switch to the generated list."}${removes} Rename this preset instead to keep both.`
+        : `The preset on OpenRouter was edited there.${removes}`,
+      foreign ? "Overwrite" : "Replace",
+    );
+    if (!ok) return;
+  }
   busy.value = true;
   const created = status.value === "not-created";
-  const res = await act(() => unwrap(client.presets.sync.$post({ json: { models: [props.preset.model], view: viewQuery.value, dryRun: dryRun.value } })));
+  const accept: ("unknown" | "foreign" | "edits")[] = unchecked ? ["unknown"] : [...(foreign ? (["foreign"] as const) : []), ...(edits.length > 0 ? (["edits"] as const) : [])];
+  const res = await act(() =>
+    unwrap(client.presets.sync.$post({ json: { models: [props.preset.model], dryRun: false, accept, slugs: { [props.preset.model]: props.preset.slug } } })),
+  );
   busy.value = false;
   const r = res?.[0];
   if (!r) return;
   if (r.status === "failed") notify("Write failed", r.error ?? r.slug, "err");
-  else if (r.status === "planned") previewOnly();
   else if (r.status === "skipped") notify("Nothing to sync", r.error ?? `@preset/${r.slug}`, "info");
   else notify(created ? "Preset created" : "Preset updated", `@preset/${r.slug}`);
   await reloadAfterWrite();
@@ -175,23 +228,47 @@ const SCEN_GRID = "grid grid-cols-[minmax(0,1fr)_80px_88px_56px_92px] items-cent
         <StatusBadge :kind="badge.kind" class="h-[22px] text-[11.5px]">{{ badge.text }}</StatusBadge>
       </div>
       <div class="flex gap-2">
-        <div class="flex h-9 flex-1 items-center overflow-hidden whitespace-nowrap rounded-lg border border-border bg-muted px-3 font-mono text-[13px]">{{ preset.presetId }}</div>
-        <button type="button" class="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-[13px] font-medium text-primary-foreground" @click="copy(preset.presetId)">
+        <div :class="cn('flex h-9 min-w-0 flex-1 items-center rounded-lg border border-border bg-muted px-3 font-mono text-[13px]', !copyable && 'text-muted-foreground')" :title="preset.presetId">
+          <span class="select-all truncate">{{ preset.presetId }}</span>
+        </div>
+        <button
+          type="button"
+          :disabled="!copyable"
+          :title="copyable ? 'Copy the preset id' : badge.tip"
+          class="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-[13px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
+          @click="copy(preset.presetId)"
+        >
           <svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect width="14" height="14" x="8" y="8" rx="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>
           Copy id
         </button>
+        <button
+          type="button"
+          title="Change the preset slug"
+          class="inline-flex h-9 items-center rounded-lg border border-border bg-background px-3 text-[13px] font-medium hover:bg-accent"
+          @click="startRename"
+        >
+          Rename
+        </button>
       </div>
+      <form v-if="renaming" class="flex items-center gap-2" @submit.prevent="rename">
+        <span class="font-mono text-[13px] text-muted-foreground">@preset/</span>
+        <input
+          v-model="slugDraft"
+          :class="cn('h-8 min-w-0 flex-1 rounded-lg border bg-background px-2.5 font-mono text-[13px] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50', slugValid ? 'border-border' : 'border-bad')"
+          spellcheck="false"
+          @keydown.esc="renaming = false"
+        />
+        <button type="submit" :disabled="!slugValid" class="inline-flex h-8 items-center rounded-lg bg-primary px-3 text-[12.5px] font-medium text-primary-foreground disabled:opacity-40">Save</button>
+        <button type="button" class="inline-flex h-8 items-center rounded-lg border border-border px-3 text-[12.5px] font-medium hover:bg-accent" @click="renaming = false">Cancel</button>
+      </form>
+      <div v-if="renaming && !slugValid" class="text-xs text-bad">Lowercase letters, digits and hyphens, 2–63 characters.</div>
     </div>
 
     <div v-if="blocked" class="mx-4 mb-3.5 flex gap-2 rounded-lg bg-bad-bg px-3 py-2.5 text-[13px] text-bad">
       <svg class="mt-px size-[15px] flex-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"></path><path d="M12 9v4M12 17h.01"></path></svg>
-      <span v-if="min">
-        <b class="font-semibold">No {{ min }}+ provider.</b>
-        <span class="text-foreground"> Every endpoint serves lower or undisclosed quantization or fails the quality filters, so a safe preset cannot be built. Lower min quantization or wait for a new provider.</span>
-      </span>
-      <span v-else>
-        <b class="font-semibold">No eligible provider.</b>
-        <span class="text-foreground"> Every endpoint fails the quality filters, so a safe preset cannot be built. Relax the filters or wait for a new provider.</span>
+      <span>
+        <b class="font-semibold">{{ preset.blocker?.title ?? "No eligible provider." }}</b>
+        <span class="text-foreground"> {{ preset.blocker?.text ?? "No endpoint passes the saved rules, so this preset cannot be built." }}</span>
       </span>
     </div>
 
@@ -222,12 +299,12 @@ const SCEN_GRID = "grid grid-cols-[minmax(0,1fr)_80px_88px_56px_92px] items-cent
           <span class="text-right">{{ e.tps === null ? "—" : Math.round(e.tps) }}</span>
           <button
             type="button"
-            title="Pin provider"
+            :title="e.pinned ? 'Unpin: rank this provider by score again' : 'Pin: keep this provider at the top of the preset regardless of score'"
             :aria-pressed="e.pinned"
             :class="cn('grid size-7 place-items-center rounded-md', e.pinned ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-accent')"
             @click="togglePin(e.tag)"
           >
-            <svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect width="18" height="11" x="3" y="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+            <svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"></path><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"></path></svg>
           </button>
         </div>
       </div>
@@ -273,7 +350,9 @@ const SCEN_GRID = "grid grid-cols-[minmax(0,1fr)_80px_88px_56px_92px] items-cent
 
     <div class="mt-auto flex items-center gap-2.5 border-t border-border py-2.5 pl-4 pr-3">
       <Toggle :model-value="preset.autoSync" label="Auto-sync" @update:model-value="patch({ autoSync: $event })" />
-      <span class="text-[12.5px]">Auto-sync on refresh</span>
+      <span class="text-[12.5px]" :title="dryRun ? 'Dry-run is on: scheduled refreshes only plan the write' : 'Scheduled refreshes rewrite this preset whenever the saved ranking changes'">
+        Auto-sync on schedule<span v-if="dryRun && preset.autoSync" class="text-warn"> · paused in dry-run</span>
+      </span>
       <div class="ml-auto flex gap-1.5">
         <button v-if="!blocked" type="button" class="inline-flex h-[30px] items-center gap-1 rounded-lg px-2.5 text-[12.5px] font-medium hover:bg-accent" @click="jsonOpen = !jsonOpen">
           JSON
@@ -283,7 +362,8 @@ const SCEN_GRID = "grid grid-cols-[minmax(0,1fr)_80px_88px_56px_92px] items-cent
         <button
           v-else
           type="button"
-          :disabled="busy"
+          :disabled="busy || (!dryRun && writeBlocked !== null)"
+          :title="!dryRun && writeBlocked ? writeBlocked : undefined"
           :class="cn('inline-flex h-[30px] items-center gap-1.5 rounded-lg px-3 text-[12.5px] font-medium disabled:cursor-wait disabled:opacity-70', status === 'up-to-date' && !dryRun ? 'border border-border bg-background' : 'bg-primary text-primary-foreground')"
           @click="sync"
         >

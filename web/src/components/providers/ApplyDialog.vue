@@ -34,9 +34,9 @@ const lines = computed<Line[]>(() => {
       key: `a:${x}`,
       sign: before.has(x) ? " " : "+",
       text: `    "${x}"${i < after.length - 1 ? "," : ""}`,
-      cls: before.has(x) ? "" : "bg-ok-bg text-ok",
+      cls: before.has(x) ? "" : "bg-bad-bg text-bad",
     })),
-    ...removed.map((x) => ({ key: `r:${x}`, sign: "−", text: `    "${x}"`, cls: "bg-bad-bg text-bad" })),
+    ...removed.map((x) => ({ key: `r:${x}`, sign: "−", text: `    "${x}"`, cls: "bg-ok-bg text-ok" })),
     { key: "end", sign: " ", text: "  ]", cls: "" },
     { key: "close", sign: " ", text: "}", cls: "" },
   ];

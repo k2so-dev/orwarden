@@ -33,7 +33,7 @@ const rows = computed(() =>
       <span class="px-3">Scenario</span>
       <span class="px-3 text-right">Default routing</span>
       <span class="px-3 text-right">With bans</span>
-      <span class="px-3 text-right">With preset</span>
+      <span class="px-3 text-right">With saved preset</span>
     </div>
     <div
       v-for="r in rows"

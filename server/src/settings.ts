@@ -3,6 +3,8 @@ import { z } from "zod";
 const ratio = z.number().min(0).max(1);
 const positive = z.number().positive();
 
+export const PRESET_SLUG_RE = /^[a-z0-9][a-z0-9-]{1,62}$/;
+
 export const ScenarioSchema = z.object({
   name: z.string().min(1).max(40),
   tools: z.boolean(),
@@ -22,6 +24,7 @@ export const SettingsSchema = z.object({
     minQuantization: z.string(),
     nativeQuantization: z.record(z.string(), z.string()),
     banLowQuantProviders: z.boolean(),
+    zdrOnly: z.boolean(),
     minUptime: ratio,
     minTps: z.number().min(0),
     slowPenalty: z.number().min(1),
@@ -74,6 +77,7 @@ export const DEFAULT_SETTINGS: Settings = {
     minQuantization: "fp8",
     nativeQuantization: { "openai/gpt-oss": "fp4" },
     banLowQuantProviders: true,
+    zdrOnly: false,
     minUptime: 0.97,
     minTps: 0,
     slowPenalty: 1.2,

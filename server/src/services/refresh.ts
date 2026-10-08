@@ -144,7 +144,7 @@ export async function refresh(rt: Runtime, scheduled = false): Promise<RefreshRe
       if (settings.mode === "apply") {
         applied = await applyBans(rt, { kind: "scheduled", force: true, decisions });
       }
-      presets = await syncPresets(rt, "auto", { scenario: settings.presets.defaultScenario });
+      presets = await syncPresets(rt, "auto", { scenario: settings.presets.defaultScenario }, settings.mode === "dry-run");
     }
     if (!applied) {
       const current = sorted((snapshot.guardrail.ignored_providers ?? []).map((p) => p.toLowerCase()));

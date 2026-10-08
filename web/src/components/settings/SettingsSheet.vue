@@ -7,8 +7,10 @@ import { client, unwrap, type Settings } from "@/lib/api";
 import { inDays } from "@/lib/format";
 import { act, loadAll, refreshNow, reloadAfterWrite, settings, status } from "@/stores/data";
 import { notify } from "@/stores/toast";
-import { QUANT_OPTIONS } from "@/stores/filters";
+import { QUANT_OPTIONS, scenarioLabel } from "@/stores/filters";
+import { confirmAction, confirmRequest } from "@/stores/confirm";
 import { settingsOpen } from "@/stores/ui";
+import Toggle from "@/components/app/Toggle.vue";
 
 const INTERVALS = [
   { value: "*/15 * * * *", label: "15 min" },
@@ -22,6 +24,20 @@ const RANK_OPTIONS = [
 ];
 
 const draft = reactive<{ value: Settings | null }>({ value: null });
+const baseline = ref("");
+const dirty = computed(() => draft.value !== null && JSON.stringify(draft.value) !== baseline.value);
+const sheetOpen = computed({
+  get: () => settingsOpen.value,
+  set: (open: boolean) => {
+    if (open) settingsOpen.value = true;
+    else if (!confirmRequest.value) void close();
+  },
+});
+
+async function close(): Promise<void> {
+  if (dirty.value && !(await confirmAction("Discard unsaved changes?", "The settings you edited have not been saved.", "Discard", true))) return;
+  settingsOpen.value = false;
+}
 const saving = ref(false);
 const newPrefix = ref("");
 const newQuant = ref("fp4");
@@ -29,7 +45,10 @@ const replacing = ref(false);
 const newKey = ref("");
 
 watch(settingsOpen, (open) => {
-  if (open && settings.value) draft.value = structuredClone(JSON.parse(JSON.stringify(settings.value)));
+  if (open && settings.value) {
+    draft.value = JSON.parse(JSON.stringify(settings.value));
+    baseline.value = JSON.stringify(draft.value);
+  }
   replacing.value = false;
   newKey.value = "";
 });
@@ -56,6 +75,12 @@ const rankBy = computed({
     if (draft.value) draft.value.presets.rankBy = v as Settings["presets"]["rankBy"];
   },
 });
+const scenarioOptions = computed(() => {
+  const names = ["actual", ...(s.value?.scenarios.profiles.map((p) => p.name) ?? [])];
+  const saved = s.value?.presets.defaultScenario;
+  return saved && !names.includes(saved) ? [...names, saved] : names;
+});
+const missingScenario = (name: string) => !!s.value && name !== "actual" && !s.value.scenarios.profiles.some((p) => p.name === name);
 const keyLabel = computed(() => status.value?.key.label ?? (status.value?.key.source === "env" ? "set from environment" : "not set"));
 
 function addException() {
@@ -69,9 +94,26 @@ function removeException(prefix: string) {
   if (draft.value) delete draft.value.filters.nativeQuantization[prefix];
 }
 
-async function save() {
+function blankNumbers(value: unknown, base: unknown, path: string[] = []): string[] {
+  if (typeof base === "number") return typeof value === "number" && Number.isFinite(value) ? [] : [path.join(".")];
+  if (base && typeof base === "object" && !Array.isArray(base) && value && typeof value === "object") {
+    return Object.keys(base).flatMap((k) => blankNumbers((value as Record<string, unknown>)[k], (base as Record<string, unknown>)[k], [...path, k]));
+  }
+  return [];
+}
+
+async function save(closeAfter = true): Promise<boolean> {
   const d = draft.value;
-  if (!d) return;
+  if (!d) return false;
+  const blank = blankNumbers(d, JSON.parse(baseline.value));
+  if (blank.length > 0) {
+    notify("Fill in every number", `Empty or invalid: ${blank.join(", ")}`, "err");
+    return false;
+  }
+  if ([d.scoring.price, d.scoring.speed, d.scoring.reliability].some((w) => w > 100)) {
+    notify("Weights out of range", "Scoring weights go from 0 to 100.", "err");
+    return false;
+  }
   saving.value = true;
   const workspaceChanged = (d.workspaceId ?? null) !== (settings.value?.workspaceId ?? null);
   const res = await act(
@@ -93,12 +135,14 @@ async function save() {
     "Next refresh uses the new rules",
   );
   saving.value = false;
-  if (res) {
-    settings.value = res;
-    settingsOpen.value = false;
-    if (workspaceChanged) await refreshNow(false);
-    else await reloadAfterWrite();
-  }
+  if (!res) return false;
+  settings.value = res;
+  draft.value = JSON.parse(JSON.stringify(res));
+  baseline.value = JSON.stringify(draft.value);
+  if (closeAfter) settingsOpen.value = false;
+  if (workspaceChanged) await refreshNow(false);
+  else await reloadAfterWrite();
+  return true;
 }
 
 async function replaceKey() {
@@ -112,6 +156,8 @@ async function replaceKey() {
 }
 
 async function removeKey() {
+  const ok = await confirmAction("Remove the management key?", "rerouter stops reading OpenRouter and cannot write bans or presets until a new key is connected.", "Remove key", true);
+  if (!ok) return;
   const res = await act(() => unwrap(client.key.$delete()), "Key removed");
   if (res) {
     settingsOpen.value = false;
@@ -120,7 +166,7 @@ async function removeKey() {
 }
 
 async function testAlert() {
-  await save();
+  if (dirty.value && !(await save(false))) return;
   const d = draft.value;
   const target = d?.alerts.telegramChatId ? `Telegram · chat ${d.alerts.telegramChatId}` : d?.alerts.webhook ? `Webhook · ${d.alerts.webhook}` : "No channel configured";
   const res = await act(() => unwrap(client.alerts.test.$post()));
@@ -135,8 +181,8 @@ const btn = "h-8 rounded-lg border border-border bg-background px-3 text-[13px] 
 </script>
 
 <template>
-  <Sheet v-model:open="settingsOpen">
-    <SheetContent side="right" class="flex w-[520px] max-w-full flex-col gap-0 p-0 sm:max-w-[520px]">
+  <Sheet v-model:open="sheetOpen">
+    <SheetContent side="right" @interact-outside="(e: Event) => confirmRequest && e.preventDefault()" class="flex w-[520px] max-w-full flex-col gap-0 p-0 sm:max-w-[520px]">
       <SheetHeader class="border-b border-border px-6 pb-4 pt-5">
         <SheetTitle class="text-base font-semibold">Settings</SheetTitle>
         <SheetDescription class="text-[13px]">Stored on this server. OpenRouter only changes on Apply.</SheetDescription>
@@ -222,6 +268,24 @@ const btn = "h-8 rounded-lg border border-border bg-background px-3 text-[13px] 
             <div class="text-xs text-muted-foreground">points off the overall score · open-weight models only</div>
           </div>
           <input v-model.number="s.scoring.unknownQuantPenalty" type="number" min="0" max="100" :class="num" />
+          <div>
+            <div class="font-medium">ZDR endpoints only</div>
+            <div class="text-xs text-muted-foreground">presets keep only zero-data-retention endpoints</div>
+          </div>
+          <Toggle v-model="s.filters.zdrOnly" label="ZDR endpoints only" />
+        </div>
+
+        <div :class="section">Scoring</div>
+        <div :class="row">
+          <div>
+            <div class="font-medium">Weights</div>
+            <div class="text-xs text-muted-foreground">price / speed / reliability for the overall score</div>
+          </div>
+          <div class="flex gap-1.5">
+            <input v-model.number="s.scoring.price" type="number" min="0" max="100" step="5" :class="[num, 'w-14']" aria-label="Price weight" />
+            <input v-model.number="s.scoring.speed" type="number" min="0" max="100" step="5" :class="[num, 'w-14']" aria-label="Speed weight" />
+            <input v-model.number="s.scoring.reliability" type="number" min="0" max="100" step="5" :class="[num, 'w-14']" aria-label="Reliability weight" />
+          </div>
         </div>
 
         <div :class="section">Bans</div>
@@ -249,7 +313,17 @@ const btn = "h-8 rounded-lg border border-border bg-background px-3 text-[13px] 
             <div class="text-xs text-muted-foreground">order of providers inside a preset</div>
           </div>
           <Segmented v-model="rankBy" :options="RANK_OPTIONS" size="sm" />
-          <span class="font-medium">Naming pattern</span>
+          <div>
+            <div class="font-medium">Workload</div>
+            <div class="text-xs text-muted-foreground">traffic profile used to rank presets</div>
+          </div>
+          <select v-model="s.presets.defaultScenario" :class="[input, 'w-[180px]']">
+            <option v-for="name in scenarioOptions" :key="name" :value="name">{{ missingScenario(name) ? `${name} (deleted, ranks as actual)` : scenarioLabel(name) }}</option>
+          </select>
+          <div>
+            <div class="font-medium">Naming pattern</div>
+            <div class="text-xs text-muted-foreground">ids of presets synced from here never change; all others follow the new pattern</div>
+          </div>
           <input v-model="s.presets.slugPattern" :class="[input, 'w-[180px] font-mono text-[12.5px]']" />
         </div>
 
@@ -269,8 +343,9 @@ const btn = "h-8 rounded-lg border border-border bg-background px-3 text-[13px] 
         </div>
       </div>
       <div class="flex justify-end gap-2 border-t border-border px-6 py-3.5">
-        <button type="button" class="h-[34px] rounded-lg border border-border bg-background px-3.5 text-[13px] font-medium hover:bg-accent" @click="settingsOpen = false">Cancel</button>
-        <button type="button" :disabled="saving" class="h-[34px] rounded-lg bg-primary px-3.5 text-[13px] font-medium text-primary-foreground disabled:opacity-50" @click="save">Save settings</button>
+        <span v-if="dirty" class="mr-auto self-center text-xs text-warn">Unsaved changes</span>
+        <button type="button" class="h-[34px] rounded-lg border border-border bg-background px-3.5 text-[13px] font-medium hover:bg-accent" @click="close">Cancel</button>
+        <button type="button" :disabled="saving || !dirty" class="h-[34px] rounded-lg bg-primary px-3.5 text-[13px] font-medium text-primary-foreground disabled:opacity-50" @click="save()">Save settings</button>
       </div>
     </SheetContent>
   </Sheet>

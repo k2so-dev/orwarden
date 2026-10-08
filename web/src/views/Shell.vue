@@ -20,7 +20,7 @@ const unreachable = computed(() => status.value?.health === "unreachable");
 const invalidKey = computed(() => status.value?.health === "invalid-key");
 const lastGood = computed(() => ago(status.value?.takenAt));
 const errorText = computed(() => status.value?.lastError?.message ?? loadError.value ?? "OpenRouter did not respond.");
-const skeleton = computed(() => refreshing.value || (loading.value && !ready.value));
+const skeleton = computed(() => loading.value && !ready.value);
 const noData = computed(() => !skeleton.value && !ready.value);
 
 const counts = computed(() => ({
@@ -55,7 +55,7 @@ const alertBox = "flex items-start gap-3 rounded-[10px] border border-bad bg-bad
           </svg>
           <div class="flex-1">
             <div class="text-[13.5px] font-semibold">OpenRouter unreachable</div>
-            <div class="text-[13px] text-foreground/85">{{ errorText.replace(/\.?$/, ".") }} Showing last good data from {{ lastGood }} — writes will fail until it recovers.</div>
+            <div class="text-[13px] text-foreground/85">{{ errorText.replace(/\.?$/, ".") }} Showing last good data from {{ lastGood }} — writes are disabled until it recovers.</div>
           </div>
           <button type="button" class="h-[30px] rounded-lg border border-border bg-background px-3 text-[13px] font-medium text-foreground" @click="refreshNow(false)">Retry</button>
         </div>
@@ -66,7 +66,7 @@ const alertBox = "flex items-start gap-3 rounded-[10px] border border-bad bg-bad
           </svg>
           <div class="flex-1">
             <div class="text-[13.5px] font-semibold">Management key rejected</div>
-            <div class="text-[13px] text-foreground/85">OpenRouter returned 401 — the key was revoked or expired. Showing data from {{ lastGood }}; writes are disabled.</div>
+            <div class="text-[13px] text-foreground/85">OpenRouter returned 401 — the key was revoked or expired. Showing data from {{ lastGood }}; writes are disabled until the key is replaced.</div>
           </div>
           <button type="button" class="h-[30px] rounded-lg bg-primary px-3 text-[13px] font-medium text-primary-foreground" @click="settingsOpen = true">Replace key</button>
         </div>
@@ -109,7 +109,7 @@ const alertBox = "flex items-start gap-3 rounded-[10px] border border-bad bg-bad
         <div v-else-if="noData" class="flex flex-col items-center gap-2.5 rounded-xl border border-dashed border-border px-6 py-12 text-center">
           <div class="text-[15px] font-semibold">{{ hasData ? "Data could not be loaded" : "No data yet" }}</div>
           <div class="max-w-[440px] text-[13.5px] text-muted-foreground">{{ hasData ? errorText : "Run the first refresh to read providers, prices and your traffic from OpenRouter." }}</div>
-          <button type="button" class="mt-1.5 h-[34px] rounded-lg bg-primary px-3.5 text-[13px] font-medium text-primary-foreground" @click="refreshNow(false)">Refresh now</button>
+          <button type="button" :disabled="refreshing" class="mt-1.5 h-[34px] rounded-lg bg-primary px-3.5 text-[13px] font-medium text-primary-foreground disabled:cursor-wait disabled:opacity-70" @click="refreshNow(false)">{{ refreshing ? "Refreshing…" : "Refresh now" }}</button>
         </div>
         <template v-else>
           <ModelsTab v-if="tab === 'models'" />

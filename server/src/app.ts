@@ -7,9 +7,10 @@ import { sendAlert } from "./core/alert.ts";
 import { HttpError } from "./core/openrouter.ts";
 import { buildOverview, buildProviders, spendFor } from "./services/analysis.ts";
 import { applyBans, banHistory, discardDrafts, rollback } from "./services/bans.ts";
-import { listPresets, syncPresets, updatePresetSettings } from "./services/presets.ts";
+import { listPresets, pinLegacySlugs, syncPresets, updatePresetSettings } from "./services/presets.ts";
 import { refresh } from "./services/refresh.ts";
 import { AppError, type Runtime } from "./services/state.ts";
+import { PRESET_SLUG_RE } from "./settings.ts";
 
 const bool = z.enum(["true", "false"]).transform((v) => v === "true");
 const num = (min: number, max: number) => z.coerce.number().min(min).max(max);
@@ -30,7 +31,7 @@ export const ViewQuerySchema = z.object({
   wReliability: num(0, 100).optional(),
 });
 
-const PresetSlug = z.string().regex(/^[a-z0-9][a-z0-9-]{1,62}$/);
+const PresetSlug = z.string().regex(PRESET_SLUG_RE);
 
 const PresetSettingsBody = z.object({
   model: z.string().min(3),
@@ -59,6 +60,7 @@ function nextRuns(cron: string, now: Date): { next: string; intervalMs: number }
 export function createApp(rt: Runtime) {
   const auth: AuthOptions = { password: rt.env.password, secret: rt.vault.sessionSecret, secure: rt.env.secureCookies };
   const limiter = new LoginLimiter();
+  pinLegacySlugs(rt);
 
   const app = new Hono()
     .basePath("/api")
@@ -253,9 +255,9 @@ export function createApp(rt: Runtime) {
       const { model, ...patch } = c.req.valid("json");
       return c.json(updatePresetSettings(rt, model, patch));
     })
-    .post("/presets/sync", zValidator("json", z.object({ models: z.array(z.string().min(3)).min(1).max(50), scenario: z.string().max(40).optional(), view: ViewQuerySchema.optional(), dryRun: z.boolean().default(false) })), async (c) => {
-      const { models, scenario, view, dryRun } = c.req.valid("json");
-      return c.json(await rt.exclusive(() => syncPresets(rt, models, view ?? { scenario: scenario ?? rt.settings().presets.defaultScenario }, dryRun)));
+    .post("/presets/sync", zValidator("json", z.object({ models: z.array(z.string().min(3)).min(1).max(50), dryRun: z.boolean().default(false), accept: z.array(z.enum(["unknown", "foreign", "edits"])).default([]), slugs: z.record(z.string(), z.string()).default({}) })), async (c) => {
+      const { models, dryRun, accept, slugs } = c.req.valid("json");
+      return c.json(await rt.exclusive(() => syncPresets(rt, models, { scenario: rt.settings().presets.defaultScenario }, dryRun, accept, slugs)));
     })
     .post("/alerts/test", async (c) => {
       const alerts = rt.settings().alerts;

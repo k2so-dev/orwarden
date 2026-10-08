@@ -73,7 +73,7 @@ export type Preset = {
   name: string;
   status?: string;
   updated_at?: string;
-  designated_version?: { version?: number; config?: PresetConfig; updated_at?: string } | null;
+  designated_version?: { version?: number; config?: PresetConfig; system_prompt?: string | null; updated_at?: string } | null;
 };
 
 export interface OpenRouterApi {

@@ -18,13 +18,15 @@ const QUANT_RANK: Record<string, number> = {
 
 export const quantRank = (q: string): number => QUANT_RANK[q.toLowerCase()] ?? 0;
 
-export function modelMinQuantRank(slug: string, config: Config): number {
-  let rank = quantRank(config.filters.minQuantization);
+export function modelMinQuantization(slug: string, config: Config): string {
+  let min = config.filters.minQuantization;
   for (const [prefix, native] of Object.entries(config.filters.nativeQuantization)) {
-    if (slug.startsWith(prefix)) rank = Math.min(rank, quantRank(native));
+    if (slug.startsWith(prefix) && quantRank(native) < quantRank(min)) min = native;
   }
-  return rank;
+  return min;
 }
+
+export const modelMinQuantRank = (slug: string, config: Config): number => quantRank(modelMinQuantization(slug, config));
 
 export function median(values: number[]): number {
   if (values.length === 0) return 0;
