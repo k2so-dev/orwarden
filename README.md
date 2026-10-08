@@ -2,6 +2,8 @@
 
 Self-hosted dashboard that keeps OpenRouter routing honest. It scores every provider endpoint of the models you use by price, speed and reliability, keeps a global provider ban list in the workspace default guardrail, and builds per-model presets (`@preset/<slug>`) that pin the most efficient providers in order.
 
+![orwarden dashboard](docs/screenshot.png)
+
 ## Run
 
 ```sh
