@@ -34,9 +34,9 @@ const lines = computed<Line[]>(() => {
       key: `a:${x}`,
       sign: before.has(x) ? " " : "+",
       text: `    "${x}"${i < after.length - 1 ? "," : ""}`,
-      cls: before.has(x) ? "" : "bg-bad-bg text-bad",
+      cls: before.has(x) ? "" : "bg-ok-bg text-ok",
     })),
-    ...removed.map((x) => ({ key: `r:${x}`, sign: "−", text: `    "${x}"`, cls: "bg-ok-bg text-ok" })),
+    ...removed.map((x) => ({ key: `r:${x}`, sign: "−", text: `    "${x}"`, cls: "bg-bad-bg text-bad" })),
     { key: "end", sign: " ", text: "  ]", cls: "" },
     { key: "close", sign: " ", text: "}", cls: "" },
   ];
@@ -47,9 +47,9 @@ const btn = "h-[34px] rounded-lg px-3.5 text-[13px] font-medium";
 
 <template>
   <AlertDialog v-model:open="open">
-    <AlertDialogContent class="flex w-[560px] max-w-[calc(100vw-32px)] flex-col gap-3.5 rounded-xl p-6 sm:max-w-[560px]">
+    <AlertDialogContent @open-auto-focus.prevent class="flex w-[560px] shadow-[0_16px_48px_rgb(0_0_0/.2)] max-w-[calc(100vw-32px)] flex-col gap-3.5 rounded-xl p-6 sm:max-w-[560px]">
       <div>
-        <AlertDialogTitle class="text-[17px] font-semibold">{{ dryRun ? "Preview guardrail changes" : "Apply to guardrail" }}</AlertDialogTitle>
+        <AlertDialogTitle class="text-[17px] font-semibold">{{ dryRun ? "Preview guardrail change" : "Apply to workspace guardrail?" }}</AlertDialogTitle>
         <AlertDialogDescription class="mt-1 text-[13.5px] text-muted-foreground">
           This replaces the guardrail's provider blacklist for every app in {{ workspace }}.
         </AlertDialogDescription>

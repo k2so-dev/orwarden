@@ -17,7 +17,7 @@ function onInput(e: Event): void {
     <div class="absolute inset-x-0 h-1 rounded-full bg-muted">
       <div class="h-1 rounded-full bg-primary" :style="{ width: pct }"></div>
     </div>
-    <div class="absolute -ml-[7px] size-[14px] rounded-full border-[1.5px] border-primary bg-background" :style="{ left: pct }"></div>
+    <div class="absolute -ml-[6.5px] size-[13px] rounded-full border-[1.5px] border-primary bg-background" :style="{ left: pct }"></div>
     <input
       type="range"
       :min="min"

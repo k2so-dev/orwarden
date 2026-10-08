@@ -145,7 +145,7 @@ const cell = "px-2.5 text-right";
         type="button"
         :aria-pressed="row.presetRank !== null"
         :title="row.presetRank !== null ? 'In the preset — click to remove' : pickable ? 'Add to the preset' : (pickReason ?? '')"
-        :class="cn('tnum grid size-[18px] flex-none place-items-center rounded border text-[11px] font-semibold', row.presetRank !== null ? 'border-primary bg-primary text-primary-foreground' : 'border-border', !pickable && 'opacity-35')"
+        :class="cn('tnum grid size-[18px] flex-none place-items-center rounded-[5px] border-[1.5px] text-[10.5px] font-bold', row.presetRank !== null ? 'border-primary bg-primary text-primary-foreground' : 'border-border', !pickable && 'opacity-35')"
         @click="onPick"
       >
         {{ row.presetRank ?? "" }}
@@ -156,7 +156,7 @@ const cell = "px-2.5 text-right";
           <path d="m9 18 6-6-6-6"></path>
         </svg>
       </button>
-      <span :class="cn('tnum w-[22px] text-right text-muted-foreground', dim && 'line-through')">{{ position }}</span>
+      <span :class="cn('tnum w-[22px] text-right font-semibold', row.presetRank === null && 'text-muted-foreground')">{{ position }}</span>
       <div :class="cn('flex min-w-0 flex-col pl-1 leading-tight', dim && 'opacity-45')">
         <span class="font-medium">{{ row.providerName }}</span>
         <span class="font-mono text-[11px] text-muted-foreground">{{ row.tag }}</span>
@@ -213,7 +213,7 @@ const cell = "px-2.5 text-right";
     </div>
   </div>
   <div v-if="open" class="w-max min-w-full border-b border-border bg-muted">
-    <div class="sticky left-0 grid w-[min(1120px,calc(100vw-90px))] grid-cols-[1.1fr_.9fr_1.2fr] gap-6 whitespace-normal py-3.5 pl-12 pr-4">
+    <div class="sticky left-0 grid w-[min(1120px,calc(100vw-90px))] grid-cols-[1.1fr_.9fr_1.2fr] gap-6 whitespace-normal pb-4 pl-12 pr-4 pt-3.5">
       <div>
         <div class="mb-1.5 text-xs font-semibold">Cost at this workload <span class="font-normal text-muted-foreground">· {{ volumeLabel }}</span></div>
         <div class="tnum grid grid-cols-[1fr_auto_auto] gap-x-[18px] gap-y-1 text-[12.5px]">

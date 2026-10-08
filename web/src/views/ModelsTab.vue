@@ -31,9 +31,10 @@ const presetSub = computed(() => {
   const note = unbuilt.length ? ` · ${unbuilt.length === 1 ? unbuilt[0] : `${unbuilt.length} models`} without a buildable preset, counted at ban routing` : "";
   return `${saving >= 0 ? "saves" : "costs"} ${money(Math.abs(saving))} ${saving >= 0 ? "vs" : "more than"} default${note}`;
 });
-const defaultTip = [
-  { text: "OpenRouter splits traffic across endpoints by its own load balancing. Shares are estimated from each endpoint's price and uptime, the way OpenRouter weights them, not from your recorded traffic.", tone: "fg" as const },
-];
+const defaultTip = computed(() => [
+  { text: `What you pay now · ${scenarioName.value}.`, tone: "fg" as const },
+  { text: "OpenRouter splits traffic across endpoints by its own load balancing. Shares are estimated from each endpoint's price and uptime, the way OpenRouter weights them, not from your recorded traffic.", tone: "muted" as const },
+]);
 
 async function save(patch: { watchlist?: { slug: string; weightUsd: number }[]; excludedModels?: string[] }): Promise<"failed" | "saved" | "refreshed"> {
   saving.value = true;
@@ -105,17 +106,19 @@ const shown = computed(() =>
   [...results.value].sort((a, b) => Number(selected.value.has(b.id)) - Number(selected.value.has(a.id))),
 );
 
-const card = "flex flex-col gap-1.5 rounded-xl border border-border bg-card p-4";
-const cardLabel = "text-[12.5px] font-medium text-muted-foreground";
-const cardValue = "tnum text-[26px] font-semibold tracking-[-0.02em]";
-const cardSub = "text-pretty text-[12.5px] text-muted-foreground";
+const cell = "flex cursor-help flex-col justify-center gap-px border-l border-border px-4 py-2";
+const cellLabel = "whitespace-nowrap text-[11.5px] text-muted-foreground";
+const cellValue = "tnum text-[17px] font-semibold tracking-[-0.01em]";
+const banTip = computed(() => [{ text: `${banCount.value}. Bans apply to every model.`, tone: "fg" as const }]);
+const presetTip = computed(() => [{ text: presetSub.value, tone: "fg" as const }]);
+const riskTip = [{ text: "Share of traffic served at fp4 or undisclosed quantization under default routing, volume-weighted. Open-weight models only.", tone: "fg" as const }];
 </script>
 
 <template>
-  <div class="flex flex-col gap-4">
-    <div class="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-3.5 py-2.5">
-      <span class="mr-1 text-xs font-medium text-muted-foreground">Models</span>
-      <span v-for="m in models" :key="m.slug" class="inline-flex h-7 items-center gap-1.5 rounded-full border border-border bg-muted pl-2.5 pr-1 text-[12.5px]" :title="m.slug">
+  <div class="flex flex-col gap-3">
+    <div class="flex flex-wrap items-stretch rounded-xl border border-border bg-card">
+    <div class="flex min-w-0 flex-[1_1_360px] flex-wrap items-center gap-1.5 px-3.5 py-[9px]">
+      <span v-for="m in models" :key="m.slug" class="inline-flex h-[26px] items-center gap-1.5 rounded-full border border-border bg-muted pl-2.5 pr-[3px] text-[12.5px]" :title="m.slug">
         <span class="font-medium">{{ m.name }}</span>
         <span class="tnum text-muted-foreground">{{ money(m.usageUsd) }} / {{ usageDays }}d</span>
         <button type="button" :title="`Stop tracking ${m.name}`" :disabled="busy" class="grid size-5 place-items-center rounded-full text-muted-foreground hover:bg-border disabled:opacity-40" @click="removeModel(m.slug)">
@@ -123,7 +126,7 @@ const cardSub = "text-pretty text-[12.5px] text-muted-foreground";
         </button>
       </span>
       <Popover v-model:open="pickerOpen">
-        <PopoverTrigger class="inline-flex h-7 items-center gap-1.5 rounded-full border border-dashed border-border px-2.5 text-[12.5px] font-medium hover:bg-accent">
+        <PopoverTrigger class="inline-flex h-[26px] items-center gap-1.5 rounded-full border border-dashed border-border px-2.5 text-[12.5px] font-medium hover:bg-accent">
             <svg class="size-[13px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M12 5v14"></path></svg>
             Add model
           </PopoverTrigger>
@@ -134,7 +137,7 @@ const cardSub = "text-pretty text-[12.5px] text-muted-foreground";
           </div>
           <div class="max-h-[280px] overflow-y-auto p-1">
             <div class="flex items-center justify-between px-2 py-1.5 text-[11.5px] font-medium text-muted-foreground">
-              <span>Tracked first, then by traffic in the last {{ usageDays }} days</span>
+              <span>Models · traffic in last {{ usageDays }} days first</span>
               <svg v-if="busy" class="size-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
             </div>
             <div v-if="shown.length === 0" class="px-2 py-3 text-[13px] text-muted-foreground">No models found.</div>
@@ -156,43 +159,26 @@ const cardSub = "text-pretty text-[12.5px] text-muted-foreground";
           </div>
         </PopoverContent>
       </Popover>
-      <span class="ml-auto text-xs text-muted-foreground">Pre-selected: models with traffic in the last {{ usageDays }} days</span>
+    </div>
+    <div v-if="models.length > 0" class="flex flex-wrap">
+      <Tip :title="`Default routing`" :lines="defaultTip" :class="cell"><span :class="cellLabel">Default routing · {{ horizon }}</span><span :class="cellValue">{{ money(summary?.default) }}</span></Tip>
+      <Tip title="With global bans" :lines="banTip" :class="cell"><span :class="cellLabel">With global bans</span><span class="flex items-baseline gap-1.5"><span :class="cellValue">{{ money(summary?.bans) }}</span><DeltaChip :value="delta(summary?.bans, summary?.default)" /></span></Tip>
+      <Tip title="With presets" :lines="presetTip" :class="cell"><span :class="cellLabel">With presets</span><span class="flex items-baseline gap-1.5"><span :class="cellValue">{{ money(summary?.presets) }}</span><DeltaChip :value="delta(summary?.presets, summary?.default)" /></span></Tip>
+      <Tip title="Quantization risk" :lines="riskTip" :class="cell"><span :class="cellLabel">fp4 / unknown quant</span><span class="flex items-baseline gap-1.5"><span :class="[cellValue, 'text-bad']">{{ pct(summary?.riskShare) }}</span><span class="text-xs text-muted-foreground">of traffic</span></span></Tip>
+    </div>
     </div>
 
     <div v-if="presetsFailed && models.length > 0" class="rounded-[10px] border border-bad bg-bad-bg px-4 py-2.5 text-[13px] text-bad">Preset status failed to reload. Statuses below may be stale and copying is disabled until the next successful refresh.</div>
 
     <div v-if="models.length === 0" class="flex flex-col items-center gap-2.5 rounded-xl border border-dashed border-border px-6 py-12 text-center">
-      <div class="text-[15px] font-semibold">No models tracked</div>
+      <div class="text-[15px] font-semibold">No models selected</div>
       <div class="max-w-[440px] text-pretty text-[13.5px] text-muted-foreground">
-        No model had traffic in the last {{ usageDays }} days or all of them were removed. Pick the models you plan to use to see providers, savings and presets.
+        The key is valid but there was no traffic in the last {{ usageDays }} days. Pick the models you plan to use to see providers, savings and presets.
       </div>
       <button type="button" class="mt-1.5 h-[34px] rounded-lg bg-primary px-3.5 text-[13px] font-medium text-primary-foreground" @click="pickerOpen = true">Pick models</button>
     </div>
 
     <template v-else>
-      <div class="grid grid-cols-4 gap-3">
-        <div :class="card">
-          <Tip title="Default routing" :lines="defaultTip" :class="cardLabel">Default routing<svg class="ml-1 size-3 self-center" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4M12 8h.01"></path></svg></Tip>
-          <div class="flex items-baseline gap-1.5"><span :class="cardValue">{{ money(summary?.default) }}</span><span class="text-[13px] text-muted-foreground">/ {{ horizon }}</span></div>
-          <div :class="cardSub">What you pay now · {{ scenarioName }}</div>
-        </div>
-        <div :class="card">
-          <div :class="cardLabel">With global bans</div>
-          <div class="flex items-baseline gap-2"><span :class="cardValue">{{ money(summary?.bans) }}</span><DeltaChip :value="delta(summary?.bans, summary?.default)" class="h-5 rounded-md px-[7px] text-[11.5px]" /></div>
-          <div :class="cardSub">{{ banCount }}</div>
-        </div>
-        <div :class="card">
-          <div :class="cardLabel">With presets</div>
-          <div class="flex items-baseline gap-2"><span :class="cardValue">{{ money(summary?.presets) }}</span><DeltaChip :value="delta(summary?.presets, summary?.default)" class="h-5 rounded-md px-[7px] text-[11.5px]" /></div>
-          <div :class="cardSub">{{ presetSub }}</div>
-        </div>
-        <div :class="card">
-          <div :class="cardLabel">Risk: low or unknown quantization</div>
-          <div class="flex items-baseline gap-1.5"><span :class="[cardValue, 'text-bad']">{{ pct(summary?.riskShare) }}</span><span class="text-[13px] text-muted-foreground">of traffic</span></div>
-          <div class="mt-0.5 h-1.5 rounded-full bg-muted"><div class="h-1.5 rounded-full bg-bad" :style="{ width: pct(summary?.riskShare) }"></div></div>
-          <div :class="cardSub">Under default routing, volume-weighted · open-weight models only</div>
-        </div>
-      </div>
       <ModelSection v-for="m in models" :key="m.slug" :model="m" :default-open="openByDefault.has(m.slug)" />
     </template>
   </div>

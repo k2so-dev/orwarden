@@ -52,7 +52,7 @@ const rows = computed(() => {
 
 const template = computed(() => {
   const c = columns.value;
-  const parts = ["268px", "76px"];
+  const parts = ["262px", "76px"];
   if (c.zt) parts.push("46px", "50px");
   parts.push("62px", "62px", "70px", "66px", "70px", "116px", "60px");
   if (c.lat) parts.push("64px");
@@ -105,8 +105,9 @@ const indicator = (key: string | null) => (key && sortState.value.key === key ? 
       class="grid h-[34px] w-max min-w-full items-center whitespace-nowrap border-b border-border bg-muted text-[11.5px] font-medium text-muted-foreground"
       :style="{ gridTemplateColumns: template }"
     >
-      <div class="sticky left-0 z-[2] flex h-full items-center gap-2.5 border-r border-border bg-muted px-3">
-        <button type="button" class="w-[86px] text-right hover:text-foreground" title="Tick rows to compose the preset · # is the position in the preset, then the rank by score" @click="sortBy(model.slug, 'rank')">Preset #{{ indicator("rank") }}</button>
+      <div class="sticky left-0 z-[2] flex h-full items-center gap-2 border-r border-border bg-muted pl-2 pr-3">
+        <span class="w-12" title="Tick rows to compose the preset">Preset</span>
+        <button type="button" class="w-[22px] whitespace-nowrap text-right hover:text-foreground" title="Position in the preset, then rank by score" @click="sortBy(model.slug, 'rank')">#{{ indicator("rank") }}</button>
         <span>Provider · endpoint</span>
       </div>
       <template v-for="h in HEADERS" :key="h.label">
@@ -115,8 +116,8 @@ const indicator = (key: string | null) => (key && sortState.value.key === key ? 
       </template>
       <div v-if="columns.brk" class="grid grid-cols-3 gap-2 px-2.5 text-right"><span>Price</span><span>Speed</span><span>Rel.</span></div>
       <button type="button" class="px-2.5 text-left hover:text-foreground" @click="sortBy(model.slug, 'overall')">Overall{{ indicator("overall") }}</button>
-      <button type="button" class="px-2.5 text-left hover:text-foreground" @click="sortBy(model.slug, 'verdict')">Verdict{{ indicator("verdict") }}</button>
-      <button type="button" class="px-2.5 text-left hover:text-foreground" @click="sortBy(model.slug, 'ban')">Global ban{{ indicator("ban") }}</button>
+      <div class="px-2.5">Verdict</div>
+      <div class="px-2.5">Global ban</div>
     </div>
     <EndpointRow
       v-for="r in rows"

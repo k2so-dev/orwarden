@@ -10,7 +10,7 @@ import StatusBadge from "@/components/app/StatusBadge.vue";
 import { presetStatus, type PresetStatusInfo } from "@/lib/presetStatus";
 import { columns, density, modelOpen, setModelOpen } from "@/stores/ui";
 import { KINDS, kindOf } from "@/stores/filters";
-import { view } from "@/stores/workload";
+import Tip from "@/components/app/Tip.vue";
 import { overview, presets, presetsByModel, presetsFailed } from "@/stores/data";
 import EndpointTable from "./EndpointTable.vue";
 import PresetFooter from "./PresetFooter.vue";
@@ -37,7 +37,11 @@ const copyPreset = () => {
 const days = computed(() => overview.value?.horizonDays ?? 7);
 const horizonLabel = computed(() => periodLabel(days.value));
 const preset = computed(() => presetsByModel.value.get(props.model.slug));
-const kind = computed(() => KINDS[kindOf(props.model.profile.h, props.model.profile.r)].label);
+const kind = computed(() => KINDS[kindOf(props.model.h, props.model.r)]);
+const kindTip = computed(() => [
+  { text: kind.value.hint, tone: "fg" as const },
+  { text: `From ${usageDays.value}-day traffic: cache hit ${pct(props.model.h)}, output/input ${props.model.r.toFixed(2)}`, tone: "muted" as const },
+]);
 
 const COLUMN_ITEMS = [
   { key: "zt", label: "ZDR & Tools" },
@@ -68,7 +72,7 @@ const densityModel = computed({
       <div class="flex items-baseline gap-2">
         <span class="text-[15px] font-semibold">{{ model.name }}</span>
         <span class="font-mono text-xs text-muted-foreground">{{ model.slug }}</span>
-        <span class="inline-flex h-5 items-center rounded-md border border-border px-1.5 text-[11px] font-medium text-foreground" :title="view.actual ? 'Detected from real traffic' : 'Detected from the workload sliders'">{{ kind }}</span>
+        <span class="self-center" @click.stop><Tip :title="`Detected workload: ${kind.label}`" :lines="kindTip" class="h-5 items-center rounded-full border border-border px-2 text-[11.5px] font-medium">{{ kind.label }}</Tip></span>
       </div>
       <div class="tnum flex flex-wrap gap-4 text-[12.5px] text-muted-foreground">
         <span>{{ usageDays }}-day spend <b class="font-semibold text-foreground">{{ money(model.usageUsd) }}</b></span>
@@ -82,21 +86,20 @@ const densityModel = computed({
         </span>
       </div>
       <div class="ml-auto flex items-center gap-1.5" @click.stop @keydown.stop>
-        <StatusBadge :kind="presetState.kind" :title="presetState.tip">{{ presetState.text }}</StatusBadge>
-        <code v-if="model.presetId" :class="cn('select-all rounded-md bg-muted px-2 py-[5px] font-mono text-xs', !presetState.copyable && 'text-muted-foreground')">{{ presetId }}</code>
+        <StatusBadge :kind="presetState.kind" :title="presetState.tip" class="h-[22px] px-2 text-[11.5px]">{{ presetState.text }}</StatusBadge>
         <button
           v-if="model.presetId"
           type="button"
           :disabled="!presetState.copyable"
           :title="presetState.copyable ? 'Copy the preset id' : presetState.tip"
-          class="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 text-[12.5px] font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+          class="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 font-mono text-xs hover:bg-accent disabled:cursor-not-allowed disabled:text-muted-foreground"
           @click="copyPreset"
         >
+          {{ presetId }}
           <svg class="size-[13px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <rect width="14" height="14" x="8" y="8" rx="2"></rect>
             <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path>
           </svg>
-          Copy
         </button>
       </div>
     </div>

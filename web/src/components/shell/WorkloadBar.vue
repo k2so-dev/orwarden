@@ -10,7 +10,7 @@ import { DAY_OPTIONS, DEFAULT_WEIGHTS, KINDS, QUANT_OPTIONS, kindOf, localView }
 import { uptimeFloor, updateView, view } from "@/stores/workload";
 
 const label = "text-xs font-medium text-muted-foreground";
-const box = "flex h-10 items-center gap-3 rounded-[10px] border border-border bg-card px-3";
+const box = "flex h-9 items-center rounded-[10px] border border-border";
 
 const actualMix = computed(() => {
   const models = (overview.value?.models ?? []).filter((m) => m.profile.inputPerDay > 0);
@@ -88,41 +88,40 @@ const preview = computed(() => {
 });
 const previewModel = computed(() => overview.value?.models[0]?.name ?? "");
 const usageDays = computed(() => settings.value?.usageWindowDays ?? 7);
-const trigger = "inline-flex h-10 items-center gap-1.5 rounded-[10px] border border-border bg-card px-3 text-[13px] font-medium hover:bg-accent";
-const row = "flex items-center justify-between gap-3 text-[13px]";
+const trigger = "inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-background px-3 text-[13px] font-medium hover:bg-accent";
 </script>
 
 <template>
-  <div class="sticky top-14 z-20 flex flex-wrap items-center gap-2.5 border-b border-border bg-background px-5 py-2.5">
-    <div :class="box">
+  <div class="sticky top-14 z-20 flex flex-wrap items-center gap-x-2.5 gap-y-2 border-b border-border bg-background px-[max(20px,calc((100%-1640px)/2))] py-2">
+    <div :class="[box, 'gap-x-3.5 py-1 pl-3 pr-1']">
       <span :class="label">Workload</span>
       <div class="flex items-center gap-2">
         <span class="text-[12.5px]">Cache</span>
-        <RangeSlider v-model="cache" class="w-[110px]" :min="0" :max="95" :step="5" />
-        <span class="tnum w-9 text-[12.5px]">{{ cache }}%</span>
+        <RangeSlider v-model="cache" class="w-24" :min="0" :max="95" :step="5" />
+        <span class="tnum w-[30px] text-[12.5px] font-medium">{{ cache }}%</span>
       </div>
       <div class="flex items-center gap-2">
         <span class="text-[12.5px]">Out/in</span>
-        <RangeSlider v-model="ratio" class="w-[110px]" :min="0" :max="2" :step="0.05" />
-        <span class="tnum w-9 text-[12.5px]">{{ ratio.toFixed(2) }}</span>
+        <RangeSlider v-model="ratio" class="w-24" :min="0" :max="2" :step="0.05" />
+        <span class="tnum w-[30px] text-[12.5px] font-medium">{{ ratio.toFixed(2) }}</span>
       </div>
-      <Tip :title="`Detected workload: ${kind.label}`" :lines="kindTip" class="inline-flex h-6 items-center rounded-md bg-muted px-2 text-xs font-medium">{{ kind.label }}</Tip>
+      <Tip :title="`Detected workload: ${kind.label}`" :lines="kindTip" class="inline-flex h-6 items-center rounded-full bg-muted px-2.5 text-xs font-semibold">{{ kind.label }}</Tip>
       <button
         type="button"
         :aria-pressed="view.actual"
         :title="`Use each model's real traffic from the last ${usageDays} days`"
-        :class="['h-6 rounded-md border px-2 text-xs font-medium', view.actual ? 'border-primary bg-primary text-primary-foreground' : 'border-border hover:bg-accent']"
+        :class="['h-[26px] rounded-[7px] border px-2.5 text-xs font-medium', view.actual ? 'border-primary bg-primary text-primary-foreground' : 'border-border hover:bg-accent']"
         @click="updateView({ actual: !view.actual })"
       >
         Actual
       </button>
     </div>
-    <div :class="box">
-      <div :class="['flex items-center gap-1.5', view.actual && 'opacity-50']">
-        <input type="number" min="0.1" step="0.5" :value="view.volumeM" :disabled="view.actual" aria-label="Million input tokens per day" class="tnum h-7 w-[52px] rounded-md border border-border bg-transparent px-1 text-right text-[13px] outline-none" @change="onVolume" />
+    <div :class="[box, 'gap-1 pr-[3px]']">
+      <div :class="['flex items-center gap-1', view.actual && 'opacity-50']">
+        <input type="number" min="0.1" step="0.5" :value="view.volumeM" :disabled="view.actual" aria-label="Million input tokens per day" class="tnum h-[30px] w-12 bg-transparent text-right text-[13px] outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none" @change="onVolume" />
         <span class="whitespace-nowrap text-xs text-muted-foreground">M in/day</span>
       </div>
-      <Segmented v-model="days" :options="DAY_OPTIONS" />
+      <Segmented v-model="days" :options="DAY_OPTIONS" size="sm" />
     </div>
     <div class="ml-auto flex items-center gap-2">
       <Popover>
@@ -132,15 +131,14 @@ const row = "flex items-center justify-between gap-3 text-[13px]";
         </PopoverTrigger>
         <PopoverContent align="end" class="flex w-[300px] flex-col gap-3.5 rounded-[10px] p-3.5">
           <div class="text-[13px] font-semibold">Quality filters</div>
-          <div :class="row"><span>Min quantization</span><Segmented v-model="quant" :options="QUANT_OPTIONS" size="sm" /></div>
-          <div class="flex flex-col gap-2">
-            <div :class="row"><span>Min uptime · 1d</span><span class="tnum text-muted-foreground">{{ view.minUptime }}%</span></div>
-            <RangeSlider v-model="uptime" :min="uptimeFloor" :max="100" :step="0.5" />
+          <div class="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-3 text-[12.5px]">
+            <span>Min quantization</span><Segmented v-model="quant" :options="QUANT_OPTIONS" size="sm" />
+            <span>Min uptime · 1d</span>
+            <div class="flex items-center gap-2"><RangeSlider v-model="uptime" class="w-[90px]" :min="uptimeFloor" :max="100" :step="0.5" /><span class="tnum w-[38px] text-right">{{ view.minUptime }}%</span></div>
+            <span>Require tool calling</span><Toggle v-model="tools" label="Require tool calling" />
+            <span>ZDR only</span><Toggle v-model="zdr" label="ZDR only" />
+            <span>Hide banned providers</span><Toggle v-model="hide" label="Hide banned providers" />
           </div>
-          <div :class="row"><span>Require tool calling</span><Toggle v-model="tools" label="Require tool calling" /></div>
-          <div :class="row"><span>ZDR only</span><Toggle v-model="zdr" label="ZDR only" /></div>
-          <div :class="row"><span>Hide banned providers</span><Toggle v-model="hide" label="Hide banned providers" /></div>
-          <div class="border-t border-border pt-2.5 text-xs text-muted-foreground">Saved immediately. Presets, auto-sync and scheduled bans use these rules.</div>
         </PopoverContent>
       </Popover>
       <Popover>
@@ -154,12 +152,12 @@ const row = "flex items-center justify-between gap-3 text-[13px]";
             <button type="button" class="text-xs text-muted-foreground hover:text-foreground" @click="updateView({ weights: DEFAULT_WEIGHTS })">Reset {{ DEFAULT_WEIGHTS.price }} / {{ DEFAULT_WEIGHTS.speed }} / {{ DEFAULT_WEIGHTS.reliability }}</button>
           </div>
           <div class="grid grid-cols-[80px_1fr_36px] items-center gap-2.5 text-[12.5px]">
-            <span>Price</span><RangeSlider v-model="price" :min="0" :max="100" :step="1" /><span class="tnum text-right">{{ weights.price }}</span>
-            <span>Speed</span><RangeSlider v-model="speed" :min="0" :max="100" :step="1" /><span class="tnum text-right">{{ weights.speed }}</span>
-            <span>Reliability</span><RangeSlider v-model="reliability" :min="0" :max="100" :step="1" /><span class="tnum text-right">{{ weights.reliability }}</span>
+            <span>Price</span><RangeSlider v-model="price" :min="0" :max="100" :step="5" /><span class="tnum text-right">{{ weights.price }}</span>
+            <span>Speed</span><RangeSlider v-model="speed" :min="0" :max="100" :step="5" /><span class="tnum text-right">{{ weights.speed }}</span>
+            <span>Reliability</span><RangeSlider v-model="reliability" :min="0" :max="100" :step="5" /><span class="tnum text-right">{{ weights.reliability }}</span>
           </div>
           <div class="flex flex-col gap-1 border-t border-border pt-2.5">
-            <div class="mb-0.5 text-xs text-muted-foreground">Live preview · top 5 for {{ previewModel }} (vs default weights)</div>
+            <div class="mb-0.5 text-xs text-muted-foreground">Live preview · {{ previewModel }} top 5 (vs default weights)</div>
             <div v-for="p in preview" :key="p.tag" class="tnum grid grid-cols-[18px_1fr_32px_32px] gap-2 text-[12.5px]">
               <span class="text-muted-foreground">{{ p.rank }}</span>
               <span>{{ p.name }}</span>

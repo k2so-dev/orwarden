@@ -5,10 +5,11 @@ import type { PresetView } from "@/lib/api";
 import { signedMoney, signedPct } from "@/lib/format";
 import { PRESET_SLUG_RE, patchPreset, renamePreset, resetPick, syncBusy, syncLabel, syncOne } from "@/lib/presetActions";
 import { cn } from "@/lib/utils";
-import { dryRun, writeBlocked } from "@/stores/data";
+import { dryRun, settings, writeBlocked } from "@/stores/data";
 
 const props = defineProps<{ preset: PresetView }>();
 
+const topN = computed(() => settings.value?.presets.topN ?? 5);
 const blocked = computed(() => props.preset.status === "empty");
 const jsonOpen = ref(false);
 const json = computed(() => JSON.stringify(props.preset.config, null, 2));
@@ -49,26 +50,25 @@ async function saveRename() {
 </script>
 
 <template>
-  <div class="border-t border-border">
-    <div class="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
+  <div>
+    <div class="flex flex-wrap items-center gap-x-4 gap-y-2.5 py-2.5 pl-4 pr-3">
       <div class="flex min-w-0 flex-col gap-0.5">
         <div class="flex flex-wrap items-center gap-2 text-[13px]">
           <span class="font-semibold">Preset</span>
           <code class="select-all font-mono text-xs text-muted-foreground">{{ preset.presetId }}</code>
-          <span v-if="preset.picked" class="inline-flex h-5 items-center rounded-md bg-muted px-1.5 text-[11px] font-medium">hand-picked</span>
-          <button v-if="preset.picked" type="button" class="text-xs text-muted-foreground underline underline-offset-[3px] hover:text-foreground" @click="resetPick(preset.model)">Reset to top list</button>
+          <span v-if="preset.picked" class="inline-flex h-[18px] items-center rounded-[5px] bg-muted px-1.5 text-[11px] font-medium">hand-picked</span>
         </div>
         <div v-if="blocked" class="text-xs text-bad"><b class="font-semibold">{{ preset.blocker?.title ?? "No eligible provider." }}</b> {{ preset.blocker?.text ?? "No endpoint passes the filters, so this preset cannot be built." }}</div>
         <div v-else class="text-xs text-muted-foreground">{{ line }}</div>
       </div>
-      <span v-if="saving && !blocked" :class="['tnum text-[13px] font-semibold', savingTone]">{{ saving }}</span>
-      <div class="ml-auto flex items-center gap-2.5">
-        <div class="flex items-center gap-2" :title="dryRun ? 'Dry-run is on: scheduled refreshes only plan the write' : 'Scheduled refreshes rewrite this preset whenever its ranking changes'">
+      <span v-if="saving && !blocked" :class="['tnum text-[12.5px] font-semibold', savingTone]">{{ saving }}</span>
+      <div class="ml-auto flex flex-wrap items-center gap-1.5">
+        <button v-if="preset.picked" type="button" class="inline-flex h-[30px] items-center rounded-lg px-3 text-[12.5px] font-medium hover:bg-accent" @click="resetPick(preset.model)">Reset to top {{ topN }}</button>
+        <div class="flex items-center gap-1.5 px-1.5" :title="dryRun ? 'Dry-run is on: scheduled refreshes only plan the write' : 'Scheduled refreshes rewrite this preset whenever its ranking changes'">
           <Toggle :model-value="preset.autoSync" label="Auto-sync" @update:model-value="patchPreset(preset.model, { autoSync: $event })" />
-          <span class="text-[12.5px]">Auto-sync<span v-if="dryRun && preset.autoSync" class="text-warn"> · paused in dry-run</span></span>
+          <span class="text-[12.5px]">Auto-sync</span>
         </div>
-        <button type="button" class="inline-flex h-[30px] items-center rounded-lg px-2.5 text-[12.5px] font-medium hover:bg-accent" title="Change the preset slug" @click="startRename">Rename</button>
-        <button v-if="!blocked" type="button" class="inline-flex h-[30px] items-center gap-1 rounded-lg px-2.5 text-[12.5px] font-medium hover:bg-accent" @click="jsonOpen = !jsonOpen">
+                <button v-if="!blocked" type="button" class="inline-flex h-[30px] items-center gap-1 rounded-lg px-3 text-[12.5px] font-medium hover:bg-accent" @click="jsonOpen = !jsonOpen">
           JSON
           <svg :class="cn('size-[13px] transition-transform', jsonOpen && 'rotate-180')" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"></path></svg>
         </button>
@@ -97,6 +97,9 @@ async function saveRename() {
       <button type="button" class="inline-flex h-8 items-center rounded-lg border border-border px-3 text-[12.5px] font-medium hover:bg-accent" @click="renaming = false">Cancel</button>
     </form>
     <div v-if="renaming && !valid" class="px-4 pb-3 text-xs text-bad">Lowercase letters, digits and hyphens, 2–63 characters.</div>
-    <pre v-if="jsonOpen" class="max-h-[280px] overflow-auto border-t border-border bg-muted px-4 py-3 font-mono text-[11.5px] leading-[1.55]">{{ json }}</pre>
+    <div v-if="jsonOpen" class="border-t border-border bg-muted">
+      <pre class="max-h-[280px] overflow-auto px-4 py-3 font-mono text-[11.5px] leading-[1.55]">{{ json }}</pre>
+      <div class="flex justify-end px-3 pb-2.5"><button type="button" class="text-xs text-muted-foreground underline underline-offset-[3px] hover:text-foreground" @click="startRename">Rename preset</button></div>
+    </div>
   </div>
 </template>

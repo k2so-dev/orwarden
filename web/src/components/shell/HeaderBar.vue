@@ -77,7 +77,7 @@ const iconButton = "grid size-8 place-items-center rounded-lg text-foreground ho
 </script>
 
 <template>
-  <header class="sticky top-0 z-30 flex h-14 items-center gap-4 border-b border-border bg-background px-5">
+  <header class="sticky top-0 z-30 flex h-14 items-center gap-4 border-b border-border bg-background px-[max(20px,calc((100%-1640px)/2))]">
     <div class="flex flex-none items-center gap-2.5">
       <div class="grid size-[26px] place-items-center rounded-[7px] bg-primary font-mono text-sm font-semibold text-primary-foreground">r</div>
       <span class="text-[15px] font-semibold tracking-tight">orwarden</span>

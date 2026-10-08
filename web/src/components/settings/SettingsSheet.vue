@@ -11,7 +11,6 @@ import { notify } from "@/stores/toast";
 import { QUANT_OPTIONS } from "@/stores/filters";
 import { confirmAction, confirmRequest } from "@/stores/confirm";
 import { clock, settingsOpen } from "@/stores/ui";
-import Toggle from "@/components/app/Toggle.vue";
 
 const INTERVALS = [
   { value: "*/15 * * * *", label: "15 min" },
@@ -180,7 +179,7 @@ async function testAlert() {
 }
 
 const input = "h-8 rounded-lg border border-border bg-background px-2.5 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-ring/50";
-const num = `${input} w-16 text-right`;
+const num = `${input} w-16 text-right [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none`;
 const row = "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2.5 py-1.5";
 const section = "mt-2 border-t border-border pb-1.5 pt-[18px] text-[11.5px] font-semibold uppercase tracking-[.06em] text-muted-foreground first:mt-0 first:border-t-0 first:pt-4";
 const btn = "h-8 rounded-lg border border-border bg-background px-3 text-[13px] font-medium hover:bg-accent";
@@ -209,10 +208,7 @@ const btn = "h-8 rounded-lg border border-border bg-background px-3 text-[13px] 
           </div>
         </div>
         <div v-if="workspaces.length > 0" :class="row">
-          <div>
-            <div class="font-medium">Workspace</div>
-            <div class="text-xs text-muted-foreground">Guardrail and usage come from this workspace</div>
-          </div>
+          <span class="font-medium">Workspace</span>
           <SelectBox :model-value="currentWorkspace" :options="workspaceOptions" class="w-[200px]" @update:model-value="setWorkspace" />
         </div>
         <div :class="row">
@@ -233,12 +229,11 @@ const btn = "h-8 rounded-lg border border-border bg-background px-3 text-[13px] 
         <div :class="row">
           <span class="font-medium">Min quantization</span>
           <SelectBox v-model="s.filters.minQuantization" :options="quantOptions" class="w-[100px]" />
-        <div class="col-span-2 flex flex-col gap-2">
           <div>
             <div class="font-medium">Native quantization exceptions</div>
             <div class="text-xs text-muted-foreground">Models trained in fp4 are not penalised</div>
           </div>
-          <div class="flex flex-wrap items-center gap-1.5">
+          <div class="flex max-w-[260px] flex-wrap items-center justify-end gap-1.5">
             <span v-for="[prefix, quant] in exceptions" :key="prefix" class="inline-flex h-6 items-center gap-1.5 rounded-md bg-muted px-2 font-mono text-[11.5px]">
               {{ prefix }} → {{ quant }}
               <button type="button" class="text-muted-foreground hover:text-foreground" :aria-label="`Remove ${prefix}`" @click="removeException(prefix)">×</button>
@@ -246,7 +241,6 @@ const btn = "h-8 rounded-lg border border-border bg-background px-3 text-[13px] 
             <input v-model="newPrefix" placeholder="vendor/model" :class="[input, 'h-6 w-32 font-mono text-xs']" @keydown.enter="addException" />
             <button type="button" class="h-6 rounded-md border border-dashed border-border px-2 text-xs hover:bg-accent" @click="addException">+ Add</button>
           </div>
-        </div>
           <span class="font-medium">Min uptime (1d)</span>
           <div class="flex items-center gap-1.5">
             <input :value="Number((s.filters.minUptime * 100).toFixed(2))" type="number" min="50" max="100" step="0.5" :class="num" @input="setUptime(($event.target as HTMLInputElement).value)" />
@@ -270,24 +264,6 @@ const btn = "h-8 rounded-lg border border-border bg-background px-3 text-[13px] 
             <div class="text-xs text-muted-foreground">points off the overall score · open-weight models only</div>
           </div>
           <input v-model.number="s.scoring.unknownQuantPenalty" type="number" min="0" max="100" :class="num" />
-          <div>
-            <div class="font-medium">ZDR endpoints only</div>
-            <div class="text-xs text-muted-foreground">presets keep only zero-data-retention endpoints</div>
-          </div>
-          <Toggle v-model="s.filters.zdrOnly" label="ZDR endpoints only" />
-        </div>
-
-        <div :class="section">Scoring</div>
-        <div :class="row">
-          <div>
-            <div class="font-medium">Weights</div>
-            <div class="text-xs text-muted-foreground">price / speed / reliability for the overall score</div>
-          </div>
-          <div class="flex gap-1.5">
-            <input v-model.number="s.scoring.price" type="number" min="0" max="100" step="5" :class="[num, 'w-14']" aria-label="Price weight" />
-            <input v-model.number="s.scoring.speed" type="number" min="0" max="100" step="5" :class="[num, 'w-14']" aria-label="Speed weight" />
-            <input v-model.number="s.scoring.reliability" type="number" min="0" max="100" step="5" :class="[num, 'w-14']" aria-label="Reliability weight" />
-          </div>
         </div>
 
         <div :class="section">Bans</div>
@@ -315,10 +291,7 @@ const btn = "h-8 rounded-lg border border-border bg-background px-3 text-[13px] 
             <div class="text-xs text-muted-foreground">order of providers inside a preset</div>
           </div>
           <Segmented v-model="rankBy" :options="RANK_OPTIONS" size="sm" />
-          <div>
-            <div class="font-medium">Naming pattern</div>
-            <div class="text-xs text-muted-foreground">ids of presets synced from here never change; all others follow the new pattern</div>
-          </div>
+          <span class="font-medium" title="Ids of presets synced from here never change; all others follow the new pattern">Naming pattern</span>
           <input v-model="s.presets.slugPattern" :class="[input, 'w-[180px] font-mono text-[12.5px]']" />
         </div>
 
@@ -338,7 +311,6 @@ const btn = "h-8 rounded-lg border border-border bg-background px-3 text-[13px] 
         </div>
       </div>
       <div class="flex justify-end gap-2 border-t border-border px-6 py-3.5">
-        <span v-if="dirty" class="mr-auto self-center text-xs text-warn">Unsaved changes</span>
         <button type="button" class="h-[34px] rounded-lg border border-border bg-background px-3.5 text-[13px] font-medium hover:bg-accent" @click="close">Cancel</button>
         <button type="button" :disabled="saving || !dirty" class="h-[34px] rounded-lg bg-primary px-3.5 text-[13px] font-medium text-primary-foreground disabled:opacity-50" @click="save()">Save settings</button>
       </div>

@@ -31,6 +31,8 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
   <PopoverPortal>
     <PopoverContent
       data-slot="popover-content"
+      @open-auto-focus.prevent
+      @close-auto-focus.prevent
       v-bind="{ ...$attrs, ...forwarded }"
       :class="
         cn(

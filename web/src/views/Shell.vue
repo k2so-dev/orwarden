@@ -4,12 +4,10 @@ import ConnectKey from "@/components/shell/ConnectKey.vue";
 import WorkloadBar from "@/components/shell/WorkloadBar.vue";
 import HeaderBar from "@/components/shell/HeaderBar.vue";
 import SettingsSheet from "@/components/settings/SettingsSheet.vue";
-import { ago, periodLabel } from "@/lib/format";
+import { ago } from "@/lib/format";
 import { clock } from "@/stores/ui";
 import { cn } from "@/lib/utils";
-import { localView } from "@/stores/filters";
-import { view, workloadLabel } from "@/stores/workload";
-import { pendingSync, presetSummary, syncAll, syncBusy } from "@/lib/presetActions";
+import { presetSummary, syncAll, syncBusy } from "@/lib/presetActions";
 import { go, tab, TABS } from "@/stores/nav";
 import { dryRun, hasData, loading, loadError, overview, presetsFailed, providers, refreshing, refreshNow, status, writeBlocked } from "@/stores/data";
 import { settingsOpen } from "@/stores/ui";
@@ -31,12 +29,6 @@ const counts = computed(() => ({
 }));
 const pendingBans = computed(() => (providers.value?.pending.added.length ?? 0) + (providers.value?.pending.removed.length ?? 0) > 0);
 
-const context = computed(() => {
-  const v = view.value;
-  const volume = v.actual ? "actual volume" : `${v.volumeM}M input / day`;
-  return `${workloadLabel()} · ${volume} · ${periodLabel(localView.value.days)} · ${v.minQuant}+ · uptime ≥ ${v.minUptime}%${v.zdrOnly ? " · ZDR only" : ""}`;
-});
-
 const tabLabel = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 const alertBox = "flex items-start gap-3 rounded-[10px] border border-bad bg-bad-bg px-4 py-3 text-bad";
 </script>
@@ -47,7 +39,7 @@ const alertBox = "flex items-start gap-3 rounded-[10px] border border-bad bg-bad
     <ConnectKey v-if="noKey" />
     <template v-else>
       <WorkloadBar />
-      <main class="mx-auto flex max-w-[1840px] flex-col gap-4 px-5 pb-[72px] pt-4">
+      <main class="mx-auto flex max-w-[1680px] flex-col gap-4 px-5 pb-[72px] pt-4">
         <div v-if="unreachable" role="alert" :class="alertBox">
           <svg class="mt-0.5 size-4 flex-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <circle cx="12" cy="12" r="10"></circle>
@@ -55,7 +47,7 @@ const alertBox = "flex items-start gap-3 rounded-[10px] border border-bad bg-bad
           </svg>
           <div class="flex-1">
             <div class="text-[13.5px] font-semibold">OpenRouter unreachable</div>
-            <div class="text-[13px] text-foreground/85">{{ errorText.replace(/\.?$/, ".") }} Showing last good data from {{ lastGood }} — writes are disabled until it recovers.</div>
+            <div class="text-[13px] text-foreground/85">{{ errorText.replace(/\.?$/, ".") }} Showing last good data from {{ lastGood }} — writes will fail until it recovers.</div>
           </div>
           <button type="button" class="h-[30px] rounded-lg border border-border bg-background px-3 text-[13px] font-medium text-foreground" @click="refreshNow(false)">Retry</button>
         </div>
@@ -66,7 +58,7 @@ const alertBox = "flex items-start gap-3 rounded-[10px] border border-bad bg-bad
           </svg>
           <div class="flex-1">
             <div class="text-[13.5px] font-semibold">Management key rejected</div>
-            <div class="text-[13px] text-foreground/85">OpenRouter returned 401 — the key was revoked or expired. Showing data from {{ lastGood }}; writes are disabled until the key is replaced.</div>
+            <div class="text-[13px] text-foreground/85">OpenRouter returned 401 — the key was revoked or expired. Showing data from {{ lastGood }}; writes are disabled.</div>
           </div>
           <button type="button" class="h-[30px] rounded-lg bg-primary px-3 text-[13px] font-medium text-primary-foreground" @click="settingsOpen = true">Replace key</button>
         </div>
@@ -89,20 +81,19 @@ const alertBox = "flex items-start gap-3 rounded-[10px] border border-bad bg-bad
               <span v-if="t === 'providers' && pendingBans" class="size-1.5 rounded-full bg-warn"></span>
             </button>
           </div>
-          <div v-if="tab === 'models' && ready" class="flex items-center gap-3">
+          <div v-if="ready" class="flex items-center gap-3">
             <span class="text-[12.5px] text-muted-foreground">{{ presetsFailed ? "Preset status unavailable" : presetSummary }}</span>
             <button
               type="button"
               :disabled="syncBusy || (!dryRun && writeBlocked !== null)"
               :title="!dryRun && writeBlocked ? writeBlocked : undefined"
-              class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-background px-3 text-[13px] font-medium hover:bg-accent disabled:cursor-wait disabled:opacity-60"
+              class="inline-flex h-[30px] items-center gap-1.5 rounded-lg border border-border bg-background px-3 text-[12.5px] font-medium hover:bg-accent disabled:cursor-wait disabled:opacity-60"
               @click="syncAll"
             >
-              <svg :class="['size-3.5', syncBusy && 'animate-spin']" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path><path d="M21 3v5h-5"></path></svg>
-              {{ dryRun ? "Preview sync" : pendingSync.length ? `Sync ${pendingSync.length} preset${pendingSync.length === 1 ? "" : "s"}` : "All presets synced" }}
+              <svg :class="['size-[13px]', syncBusy && 'animate-spin']" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path><path d="M21 3v5h-5"></path></svg>
+              {{ dryRun ? "Preview sync" : "Sync all" }}
             </button>
           </div>
-          <div v-else class="text-[12.5px] text-muted-foreground">{{ context }}</div>
         </div>
         <template v-if="skeleton">
           <div class="grid grid-cols-4 gap-3">
@@ -112,7 +103,7 @@ const alertBox = "flex items-start gap-3 rounded-[10px] border border-bad bg-bad
               <div class="h-2.5 w-[80%] animate-pulse rounded-md bg-muted"></div>
             </div>
           </div>
-          <div class="flex flex-col gap-3 rounded-xl border border-border p-4">
+          <div class="flex flex-col gap-4 rounded-xl border border-border p-4">
             <div class="h-4 w-60 animate-pulse rounded-md bg-muted"></div>
             <div v-for="n in 8" :key="n" class="grid grid-cols-[200px_60px_repeat(8,1fr)] gap-3">
               <div v-for="c in 10" :key="c" class="h-3.5 animate-pulse rounded-md bg-muted"></div>
