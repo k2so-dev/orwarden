@@ -3,10 +3,10 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "rerouter",
+      "name": "orwarden",
     },
     "server": {
-      "name": "@rerouter/server",
+      "name": "@orwarden/server",
       "dependencies": {
         "@hono/zod-validator": "^0.9.1",
         "hono": "^4.13.13",
@@ -18,7 +18,7 @@
       },
     },
     "web": {
-      "name": "@rerouter/web",
+      "name": "@orwarden/web",
       "dependencies": {
         "@fontsource-variable/geist": "^5.2.0",
         "@fontsource-variable/geist-mono": "^5.2.0",
@@ -33,7 +33,7 @@
         "vue-sonner": "^2.0.9",
       },
       "devDependencies": {
-        "@rerouter/server": "workspace:*",
+        "@orwarden/server": "workspace:*",
         "@tailwindcss/vite": "^4.3.3",
         "@types/bun": "latest",
         "@vitejs/plugin-vue": "^6.0.9",
@@ -84,11 +84,11 @@
 
     "@lucide/vue": ["@lucide/vue@1.52.0", "", { "peerDependencies": { "vue": ">=3.0.1" } }, "sha512-Gwr6c14jhY6BscoFU+B9OKsr7lg8RTAKOLgW0e61kkFwkt9Q7CZmB9AyJcvhoqapEJgRg2bFoeAcO+cqpgKzEQ=="],
 
+    "@orwarden/server": ["@orwarden/server@workspace:server"],
+
+    "@orwarden/web": ["@orwarden/web@workspace:web"],
+
     "@oxc-project/types": ["@oxc-project/types@0.153.0", "", {}, "sha512-jSNrRIyvPVLL5E1z/tS5zLAprosGz/FuI1PWwEOz59j3E4TTTzSpqKb/RDGqJhhW0QHYISGXxq582wGx6T11Tw=="],
-
-    "@rerouter/server": ["@rerouter/server@workspace:server"],
-
-    "@rerouter/web": ["@rerouter/web@workspace:web"],
 
     "@rolldown/binding-android-arm-eabi": ["@rolldown/binding-android-arm-eabi@1.2.13", "", { "os": "android", "cpu": "arm" }, "sha512-Vu/NICrgdRvUOeaJZIyB2FP63s6fO/4ud5l8dXmxDx9yDyn+mN0y+gsvsVviSli+T361Aqo0h46EuMoobrwawA=="],
 

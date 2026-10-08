@@ -79,7 +79,7 @@ const iconButton = "grid size-8 place-items-center rounded-lg text-foreground ho
   <header class="sticky top-0 z-30 flex h-14 items-center gap-4 border-b border-border bg-background px-5">
     <div class="flex flex-none items-center gap-2.5">
       <div class="grid size-[26px] place-items-center rounded-[7px] bg-primary font-mono text-sm font-semibold text-primary-foreground">r</div>
-      <span class="text-[15px] font-semibold tracking-tight">rerouter</span>
+      <span class="text-[15px] font-semibold tracking-tight">orwarden</span>
       <span class="text-muted-foreground/50">/</span>
       <span class="text-[13px] text-muted-foreground">{{ workspace }}</span>
     </div>

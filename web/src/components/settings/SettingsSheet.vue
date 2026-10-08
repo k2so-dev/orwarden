@@ -156,7 +156,7 @@ async function replaceKey() {
 }
 
 async function removeKey() {
-  const ok = await confirmAction("Remove the management key?", "rerouter stops reading OpenRouter and cannot write bans or presets until a new key is connected.", "Remove key", true);
+  const ok = await confirmAction("Remove the management key?", "orwarden stops reading OpenRouter and cannot write bans or presets until a new key is connected.", "Remove key", true);
   if (!ok) return;
   const res = await act(() => unwrap(client.key.$delete()), "Key removed");
   if (res) {

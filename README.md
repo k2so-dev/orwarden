@@ -1,4 +1,4 @@
-# rerouter
+# orwarden
 
 Self-hosted dashboard that keeps OpenRouter routing honest. It scores every provider endpoint of the models you use by price, speed and reliability, keeps a global provider ban list in the workspace default guardrail, and builds per-model presets (`@preset/<slug>`) that pin the most efficient providers in order.
 
@@ -9,7 +9,9 @@ cp .env.example .env   # set DASHBOARD_PASSWORD (8+ chars)
 docker compose up -d
 ```
 
-Open `http://127.0.0.1:3000`, log in with the password and paste an OpenRouter management key. The key is stored encrypted (AES-GCM, key derived from the dashboard password) in `data/rerouter.db`. `OPENROUTER_MANAGEMENT_KEY` in `.env` is an optional fallback.
+Upgrading an install that ran as `rerouter`: run `docker compose up -d --remove-orphans` once from the same directory so the old container is removed and stops holding the port. If the directory was renamed too, remove the old container by hand first (`docker rm -f rerouter-rerouter-1`). The existing `data/rerouter.db` keeps being used.
+
+Open `http://127.0.0.1:3000`, log in with the password and paste an OpenRouter management key. The key is stored encrypted (AES-GCM, key derived from the dashboard password) in `data/orwarden.db` (an existing `data/rerouter.db` keeps being used). `OPENROUTER_MANAGEMENT_KEY` in `.env` is an optional fallback.
 
 The server refreshes data on `REFRESH_CRON` (settings can override it). Scheduled refreshes run the ban optimizer with hysteresis; in `apply` mode they also patch the guardrail and sync presets marked as auto-sync. Manual actions in the dashboard always apply immediately.
 

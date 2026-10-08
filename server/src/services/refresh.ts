@@ -113,7 +113,7 @@ function alertText(snapshot: AppSnapshot, applied: ApplyResult | null, decisions
   if (snapshot.key.expiresAt && Date.parse(snapshot.key.expiresAt) - Date.parse(snapshot.takenAt) < 2 * 86_400_000) {
     lines.push(`Management key expires ${snapshot.key.expiresAt}`);
   }
-  return lines.length > 0 ? ["rerouter", ...lines].join("\n") : null;
+  return lines.length > 0 ? ["orwarden", ...lines].join("\n") : null;
 }
 
 export async function refresh(rt: Runtime, scheduled = false): Promise<RefreshResult> {
@@ -181,7 +181,7 @@ export async function refresh(rt: Runtime, scheduled = false): Promise<RefreshRe
       patched: false,
       error: message,
     });
-    if (scheduled) await alert(`rerouter refresh failed: ${message}`);
+    if (scheduled) await alert(`orwarden refresh failed: ${message}`);
     throw err;
   }
 }

@@ -264,7 +264,7 @@ export function createApp(rt: Runtime) {
       if (!alerts.webhook && !(alerts.telegramBotToken && alerts.telegramChatId)) {
         throw new AppError(422, "no-alert-target", "No webhook or Telegram configured");
       }
-      await sendAlert(alerts, "rerouter: test alert");
+      await sendAlert(alerts, "orwarden: test alert");
       return c.json(ok);
     });
 

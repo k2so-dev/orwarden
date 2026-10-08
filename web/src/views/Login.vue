@@ -31,7 +31,7 @@ async function submit(): Promise<void> {
       <div class="flex flex-col items-center gap-2.5 text-center">
         <div class="grid size-9 place-items-center rounded-[9px] bg-primary font-mono text-lg font-semibold text-primary-foreground">r</div>
         <div>
-          <div class="text-xl font-semibold tracking-tight">rerouter</div>
+          <div class="text-xl font-semibold tracking-tight">orwarden</div>
           <div class="mt-0.5 text-[13.5px] text-muted-foreground">Sign in to manage OpenRouter providers</div>
         </div>
       </div>

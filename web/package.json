@@ -1,5 +1,5 @@
 {
-  "name": "@rerouter/web",
+  "name": "@orwarden/web",
   "private": true,
   "type": "module",
   "scripts": {
@@ -22,7 +22,7 @@
     "vue-sonner": "^2.0.9"
   },
   "devDependencies": {
-    "@rerouter/server": "workspace:*",
+    "@orwarden/server": "workspace:*",
     "@types/bun": "latest",
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-vue": "^6.0.9",

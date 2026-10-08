@@ -1,5 +1,5 @@
 services:
-  rerouter:
+  orwarden:
     image: oven/bun:1
     working_dir: /app
     command: ["sh", "-c", "bun install --frozen-lockfile && bun run build && bun run start"]

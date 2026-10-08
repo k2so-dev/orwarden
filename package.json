@@ -1,5 +1,5 @@
 {
-  "name": "rerouter",
+  "name": "orwarden",
   "private": true,
   "type": "module",
   "workspaces": ["server", "web"],

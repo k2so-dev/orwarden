@@ -48,7 +48,7 @@ async function connect(): Promise<void> {
       <div>
         <div class="text-lg font-semibold tracking-tight">Connect OpenRouter</div>
         <div class="mt-1 text-pretty text-[13.5px] text-muted-foreground">
-          rerouter needs a management key to read provider data and write guardrails and presets. It is stored encrypted on this server.
+          orwarden needs a management key to read provider data and write guardrails and presets. It is stored encrypted on this server.
         </div>
       </div>
       <div class="flex flex-col gap-1.5">

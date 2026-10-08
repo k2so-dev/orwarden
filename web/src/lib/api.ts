@@ -1,4 +1,4 @@
-import type { AppType } from "@rerouter/server";
+import type { AppType } from "@orwarden/server";
 import { hc, type ClientResponse, type InferRequestType, type InferResponseType } from "hono/client";
 
 export const client = hc<AppType>("/", { init: { credentials: "same-origin" } }).api;

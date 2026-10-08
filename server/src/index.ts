@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
@@ -9,7 +10,9 @@ import { Runtime } from "./services/state.ts";
 import { Vault } from "./vault.ts";
 
 const env = readEnv();
-const store = new Store(join(env.dataDir, "rerouter.db"));
+const legacyDb = join(env.dataDir, "rerouter.db");
+const dbPath = join(env.dataDir, "orwarden.db");
+const store = new Store(!existsSync(dbPath) && existsSync(legacyDb) ? legacyDb : dbPath);
 const vault = await Vault.open(env.password, store);
 const rt = new Runtime({ env, store, vault });
 
@@ -28,7 +31,7 @@ rt.startScheduler(async () => {
 });
 
 Bun.serve({ port: env.port, fetch: server.fetch });
-console.log(`rerouter listening on :${env.port}, refresh cron "${rt.settings().refreshCron}"`);
+console.log(`orwarden listening on :${env.port}, refresh cron "${rt.settings().refreshCron}"`);
 
 if (!rt.snapshot() && (await rt.keySource())) {
   rt.exclusive(() => refresh(rt, false)).catch((err) => console.error(`initial refresh failed: ${err instanceof Error ? err.message : err}`));
