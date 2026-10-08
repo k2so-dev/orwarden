@@ -47,7 +47,7 @@ const alertBox = "flex items-start gap-3 rounded-[10px] border border-bad bg-bad
     <ConnectKey v-if="noKey" />
     <template v-else>
       <FilterBar />
-      <main class="mx-auto flex max-w-[1680px] flex-col gap-4 px-5 pb-[72px] pt-4">
+      <main class="mx-auto flex max-w-[1840px] flex-col gap-4 px-5 pb-[72px] pt-4">
         <div v-if="unreachable" role="alert" :class="alertBox">
           <svg class="mt-0.5 size-4 flex-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <circle cx="12" cy="12" r="10"></circle>
