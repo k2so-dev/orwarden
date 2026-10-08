@@ -28,7 +28,9 @@ orwarden answers one question per model: which providers should serve it, in whi
   - `r` – output/input ratio, output tokens (reasoning included) / input tokens;
   - input tokens per day.
 
-  *Actual traffic* takes all three from your activity (tokens over the window divided by the number of days; models without traffic fall back to `h = 0.5`, `r = 0.2` and the default volume). *Named scenarios* (`chat`, `chat-cached`, `agent`, `reasoning`, editable) and *Custom* use fixed `h`, `r`, tool requirement and a volume you choose (default 1M input tokens per day).
+  The workload bar at the top of the dashboard chooses the mode. *Actual* takes all three numbers from your activity (tokens over the window divided by the number of days; models without traffic fall back to `h = 0.5`, `r = 0.2` and the default volume). Moving the *Cache* or *Out/in* slider switches to a described workload with fixed `h`, `r` and a volume you choose (default 1M input tokens per day for every model). The label next to the sliders (Agent, RAG, Chat, Reasoning) is only a hint derived from `h` and `r`.
+
+  The workload, the quality filters (min quantization, min uptime, tool calling, ZDR) and the score weights are **saved immediately** (with an Undo toast) and are the single rule set: the tables, presets, auto-sync and scheduled bans all use them. Only the period (1d / 7d / 30d) and *Hide banned providers* stay in the browser.
 
 ### Price of an endpoint
 
@@ -70,19 +72,18 @@ Scores run from 0 to 100 and are relative to the eligible endpoints of the same 
 
 ### Presets: how the economical list is chosen
 
-A preset is built per model from the **saved** settings only. The filter bar is a what-if view: it changes the tables, never what gets written. Use *Save as defaults* to make a view the rule.
+A preset is built per model from the saved workload, filters and weights, the same ones the tables show, so what you see is what gets written.
 
 1. **Eligible.** The endpoint must:
    - have the verdict `ok`;
    - support tools when the preset workload needs them;
    - offer ZDR when *ZDR endpoints only* is on;
    - not belong to a provider in the global ban list;
-   - not be excluded on the preset card.
+   - not be left out by hand (see *Hand-picking* below).
 2. **Ranking**, set by *Ranking* in Settings:
    - `score` (default): highest overall score first. Price weighs 60%, so this is "cheapest among fast and reliable".
    - `cost`: lowest effective price `C_eff` first, with the score as tie-breaker. This is the most economical option. Pick it if price is all that matters.
 
-   Pinned endpoints always come first, in the order you pinned them.
 3. **Top N.** The first `5` (1–20) endpoints form the preset.
 4. **Written config:**
 
@@ -104,6 +105,8 @@ A preset is built per model from the **saved** settings only. The filter bar is 
    - `quantizations` is omitted for closed models and when an endpoint reports a non-standard quantization name.
    - `require_parameters` is set only for tool workloads.
 
+**Hand-picking.** The numbered tick in the first column of the endpoint table adds or removes an endpoint. After the first change the preset contains exactly the ticked endpoints (still in score order, only eligible ones, at most 20) until you press *Reset to top list*.
+
 **Expected price of a preset.** Requests go to #1. A share of them equal to its downtime falls through to #2, and so on down the list:
 
 ```
@@ -111,7 +114,7 @@ served_i = uptime_i × Π_{j<i} (1 − uptime_j)
 price    = Σ served_i · C_i / Σ served_i
 ```
 
-This is the "With saved preset" figure. It is compared with:
+This is the "With presets" figure. It is compared with:
 
 - **Default routing:** what OpenRouter does without a preset. It spreads traffic across all non-ignored endpoints with weight `uptime / p²`, where `p` is `p_in` by default (`optimizer.routingPrice` in the settings API switches it to `p_in + p_out` or the blended `C`).
 - **With global bans:** the same spread after the ban list is applied.
@@ -135,7 +138,7 @@ The Providers tab shows, for every provider, how the cost of all tracked models 
 | --- | --- |
 | Cheapest preset regardless of speed | Settings → Ranking: `cost`, or raise the price weight |
 | Fewer, cheaper fallbacks | Lower *Top N providers*; the preset price shows what each extra fallback adds |
-| Price your real mix | Keep *Actual traffic*, or pick the scenario closest to your client (agents: `agent`, chat with long history: `chat-cached`) |
+| Price your real mix | Keep *Actual* on the workload bar, or move the sliders to describe your client (agents: high cache, short answers) |
 | Accept cheaper low-precision providers | Lower min quantization (quality risk; shown as "Risk" on the Models tab) |
 | Spend less on retries | Keep min uptime high; `C_eff` already charges for downtime |
 
@@ -172,8 +175,8 @@ All routes live under `/api` and require a session cookie except `/api/auth/*`.
 | POST | `/bans/apply`, `/bans/rollback` | Write the guardrail |
 | GET | `/bans/history` | Runs and decisions |
 | GET | `/presets` | Preset plans and remote status |
-| PUT | `/presets/settings` | Slug, auto-sync, scenario, pinned, excluded |
+| PUT | `/presets/settings` | Slug, auto-sync, picked (hand-picked endpoints, `null` resets) |
 | POST | `/presets/sync` | Create or update presets on OpenRouter |
 | POST | `/alerts/test` | Send a test alert |
 
-View queries accept `scenario` (`actual`, a scenario name or `custom`), `h`, `r`, `tools`, `tokensPerDay`, `days`, `minQuantization`, `minUptime`, `zdrOnly`, `hideBanned`, `wPrice`, `wSpeed`, `wReliability`.
+View queries default to the saved workload, filters and weights (`PUT /settings` with `workload`, `filters`, `scoring`). They accept `days` and `hideBanned`; the other overrides (`scenario`, `h`, `r`, `tools`, `tokensPerDay`, `minQuantization`, `minUptime`, `zdrOnly`, `wPrice`, `wSpeed`, `wReliability`) still work for ad-hoc API calls but presets and sync ignore them.
