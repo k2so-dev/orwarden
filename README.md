@@ -182,3 +182,7 @@ All routes live under `/api` and require a session cookie except `/api/auth/*`.
 | POST | `/alerts/test` | Send a test alert |
 
 View queries default to the saved workload, filters and weights (`PUT /settings` with `workload`, `filters`, `scoring`). They accept `days` and `hideBanned`; the other overrides (`scenario`, `h`, `r`, `tools`, `tokensPerDay`, `minQuantization`, `minUptime`, `zdrOnly`, `wPrice`, `wSpeed`, `wReliability`) still work for ad-hoc API calls but presets and sync ignore them.
+
+## License
+
+[MIT](LICENSE)
