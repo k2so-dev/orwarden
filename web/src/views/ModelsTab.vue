@@ -7,16 +7,17 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import DeltaChip from "@/components/app/DeltaChip.vue";
 import Tip from "@/components/app/Tip.vue";
 import ModelSection from "@/components/models/ModelSection.vue";
-import { filters, scenarioLabel, viewQuery } from "@/stores/filters";
-import { act, overview, providers, refreshing, refreshNow, settings } from "@/stores/data";
+import { localView, viewQuery } from "@/stores/filters";
+import { workloadLabel } from "@/stores/workload";
+import { act, overview, presetsFailed, providers, refreshing, refreshNow, settings } from "@/stores/data";
 import { notify } from "@/stores/toast";
 
 const models = computed(() => overview.value?.models ?? []);
 const openByDefault = computed(() => new Set([...models.value].sort((a, b) => b.usageUsd - a.usageUsd || a.slug.localeCompare(b.slug)).slice(0, 2).map((m) => m.slug)));
 const summary = computed(() => overview.value?.summary ?? null);
 const selected = computed(() => new Set(models.value.map((m) => m.slug)));
-const horizon = computed(() => periodLabel(overview.value?.horizonDays ?? filters.value.days));
-const scenarioName = computed(() => scenarioLabel(filters.value.scenario));
+const horizon = computed(() => periodLabel(overview.value?.horizonDays ?? localView.value.days));
+const scenarioName = computed(workloadLabel);
 const usageDays = computed(() => overview.value?.usageDays ?? settings.value?.usageWindowDays ?? 7);
 const saving = ref(false);
 const busy = computed(() => saving.value || refreshing.value);
@@ -158,6 +159,8 @@ const cardSub = "text-pretty text-[12.5px] text-muted-foreground";
       <span class="ml-auto text-xs text-muted-foreground">Pre-selected: models with traffic in the last {{ usageDays }} days</span>
     </div>
 
+    <div v-if="presetsFailed && models.length > 0" class="rounded-[10px] border border-bad bg-bad-bg px-4 py-2.5 text-[13px] text-bad">Preset status failed to reload. Statuses below may be stale and copying is disabled until the next successful refresh.</div>
+
     <div v-if="models.length === 0" class="flex flex-col items-center gap-2.5 rounded-xl border border-dashed border-border px-6 py-12 text-center">
       <div class="text-[15px] font-semibold">No models tracked</div>
       <div class="max-w-[440px] text-pretty text-[13.5px] text-muted-foreground">
@@ -179,7 +182,7 @@ const cardSub = "text-pretty text-[12.5px] text-muted-foreground";
           <div :class="cardSub">{{ banCount }}</div>
         </div>
         <div :class="card">
-          <div :class="cardLabel">With saved presets</div>
+          <div :class="cardLabel">With presets</div>
           <div class="flex items-baseline gap-2"><span :class="cardValue">{{ money(summary?.presets) }}</span><DeltaChip :value="delta(summary?.presets, summary?.default)" class="h-5 rounded-md px-[7px] text-[11.5px]" /></div>
           <div :class="cardSub">{{ presetSub }}</div>
         </div>

@@ -1,7 +1,7 @@
 <script setup lang="ts" vapor>
 import { computed } from "vue";
 import type { ModelView } from "@/lib/api";
-import { money, pct, periodLabel, volume as vol } from "@/lib/format";
+import { money, pct, periodLabel } from "@/lib/format";
 import { copy } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -9,10 +9,11 @@ import Segmented from "@/components/app/Segmented.vue";
 import StatusBadge from "@/components/app/StatusBadge.vue";
 import { presetStatus, type PresetStatusInfo } from "@/lib/presetStatus";
 import { columns, density, modelOpen, setModelOpen } from "@/stores/ui";
-import { go } from "@/stores/nav";
+import { KINDS, kindOf } from "@/stores/filters";
+import { view } from "@/stores/workload";
 import { overview, presets, presetsByModel, presetsFailed } from "@/stores/data";
 import EndpointTable from "./EndpointTable.vue";
-import ScenarioTable from "./ScenarioTable.vue";
+import PresetFooter from "./PresetFooter.vue";
 
 const props = defineProps<{ model: ModelView; defaultOpen: boolean }>();
 
@@ -35,7 +36,8 @@ const copyPreset = () => {
 };
 const days = computed(() => overview.value?.horizonDays ?? 7);
 const horizonLabel = computed(() => periodLabel(days.value));
-const volume = computed(() => (overview.value?.scenario.name === "actual" ? "actual volume" : `${vol(props.model.profile.inputPerDay)} input / day`));
+const preset = computed(() => presetsByModel.value.get(props.model.slug));
+const kind = computed(() => KINDS[kindOf(props.model.profile.h, props.model.profile.r)].label);
 
 const COLUMN_ITEMS = [
   { key: "zt", label: "ZDR & Tools" },
@@ -66,6 +68,7 @@ const densityModel = computed({
       <div class="flex items-baseline gap-2">
         <span class="text-[15px] font-semibold">{{ model.name }}</span>
         <span class="font-mono text-xs text-muted-foreground">{{ model.slug }}</span>
+        <span class="inline-flex h-5 items-center rounded-md border border-border px-1.5 text-[11px] font-medium text-foreground" :title="view.actual ? 'Detected from real traffic' : 'Detected from the workload sliders'">{{ kind }}</span>
       </div>
       <div class="tnum flex flex-wrap gap-4 text-[12.5px] text-muted-foreground">
         <span>{{ usageDays }}-day spend <b class="font-semibold text-foreground">{{ money(model.usageUsd) }}</b></span>
@@ -81,14 +84,6 @@ const densityModel = computed({
       <div class="ml-auto flex items-center gap-1.5" @click.stop @keydown.stop>
         <StatusBadge :kind="presetState.kind" :title="presetState.tip">{{ presetState.text }}</StatusBadge>
         <code v-if="model.presetId" :class="cn('select-all rounded-md bg-muted px-2 py-[5px] font-mono text-xs', !presetState.copyable && 'text-muted-foreground')">{{ presetId }}</code>
-        <button
-          v-if="presetState.create"
-          type="button"
-          class="inline-flex h-7 items-center rounded-lg px-2.5 text-[12.5px] font-medium hover:bg-accent"
-          @click="go('presets')"
-        >
-          Open presets
-        </button>
         <button
           v-if="model.presetId"
           type="button"
@@ -119,7 +114,7 @@ const densityModel = computed({
       </div>
       <div class="flex items-center justify-between px-4 py-2.5">
         <span class="text-[13px] font-semibold">
-          Endpoints <span class="font-normal text-muted-foreground">· dimmed rows fail quality filters · hover a badge for the reason</span>
+          Endpoints <span class="font-normal text-muted-foreground">· tick rows to compose the preset · dimmed rows fail filters</span>
         </span>
         <Popover>
           <PopoverTrigger class="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 text-[12.5px] font-medium hover:bg-accent">
@@ -148,13 +143,8 @@ const densityModel = computed({
           </PopoverContent>
         </Popover>
       </div>
-      <EndpointTable :model="model" :horizon-label="horizonLabel" />
-      <div class="px-4 pb-4 pt-3.5">
-        <div class="text-[13px] font-semibold">
-          Scenario comparison <span class="font-normal text-muted-foreground">· {{ volume }} · {{ horizonLabel }}</span>
-        </div>
-        <ScenarioTable :model="model" />
-      </div>
+      <EndpointTable :model="model" :horizon-label="horizonLabel" :preset="preset" />
+      <PresetFooter v-if="preset" :preset="preset" />
     </div>
   </section>
 </template>

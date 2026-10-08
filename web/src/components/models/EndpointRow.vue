@@ -2,11 +2,12 @@
 import { computed } from "vue";
 import Sparkline from "@/components/app/Sparkline.vue";
 import StatusBadge, { type BadgeKind } from "@/components/app/StatusBadge.vue";
-import type { EndpointView, HistoryPoint, ModelView } from "@/lib/api";
+import type { EndpointView, HistoryPoint, ModelView, PresetView } from "@/lib/api";
 import { money, pct, periodLabel, price, seconds, uptime, volume } from "@/lib/format";
+import { togglePick } from "@/lib/presetActions";
 import { TONE_CLASS, verdictBadge, type TipLine } from "@/lib/issues";
 import { cn } from "@/lib/utils";
-import { filters, scenarioLabel } from "@/stores/filters";
+import { view } from "@/stores/workload";
 import { overview, settings } from "@/stores/data";
 import { hideTip, showTip } from "@/stores/tip";
 
@@ -19,11 +20,11 @@ const props = defineProps<{
   height: string;
   open: boolean;
   history: HistoryPoint[];
+  preset?: PresetView;
 }>();
 defineEmits<{ toggle: [] }>();
 
 const dim = computed(() => !props.row.eligible);
-const rankText = computed(() => props.row.presetRank ?? props.position);
 const quantKind = computed<BadgeKind>(() => (props.row.quant === "low" ? "bad" : props.row.quant === "unknown" ? "mute" : props.row.quant === "closed" ? "none" : "out"));
 const verdict = computed(() => verdictBadge(props.row));
 
@@ -31,7 +32,7 @@ const filterLines = computed(() => {
   const r = props.row;
   const out: string[] = [];
   if (props.model.profile.tools && !r.tools) out.push("tools not supported");
-  if (filters.value.zdrOnly && !r.zdr) out.push("no ZDR");
+  if (view.value.zdrOnly && !r.zdr) out.push("no ZDR");
   if (r.ban.inDesired) out.push("provider is banned");
   return out;
 });
@@ -67,13 +68,13 @@ function tipBan(e: Event) {
 }
 function tipScore(e: Event) {
   const s = props.row.scores;
-  const f = filters.value;
-  const total = f.wPrice + f.wSpeed + f.wReliability || 1;
-  const weighted = (s.price * f.wPrice + s.speed * f.wSpeed + s.reliability * f.wReliability) / total;
+  const w = view.value.weights;
+  const total = w.price + w.speed + w.reliability || 1;
+  const weighted = (s.price * w.price + s.speed * w.speed + s.reliability * w.reliability) / total;
   const penalty = props.row.quant === "unknown" ? Math.max(0, Math.round(weighted - s.overall)) : 0;
   const lines: TipLine[] = [
     {
-      text: `(Price ${Math.round(s.price)} × ${f.wPrice} + Speed ${Math.round(s.speed)} × ${f.wSpeed} + Reliability ${Math.round(s.reliability)} × ${f.wReliability}) / ${total} = ${weighted.toFixed(1)}`,
+      text: `(Price ${Math.round(s.price)} × ${w.price} + Speed ${Math.round(s.speed)} × ${w.speed} + Reliability ${Math.round(s.reliability)} × ${w.reliability}) / ${total} = ${weighted.toFixed(1)}`,
       tone: "fg",
     },
   ];
@@ -82,7 +83,7 @@ function tipScore(e: Event) {
   showTip(e, "Overall score", lines);
 }
 
-const upTone = computed(() => (props.row.uptime < (filters.value.minUptime ?? 97) / 100 ? "text-bad" : ""));
+const upTone = computed(() => (props.row.uptime < view.value.minUptime / 100 ? "text-bad" : ""));
 const outThresholds = computed(() => settings.value?.filters.outliers ?? { outVsMedian: 1.5, hardOutVsMedian: 2.5 });
 const omTone = computed(() => {
   const v = props.row.outVsMedian ?? 0;
@@ -104,21 +105,24 @@ const vsText = computed(() => {
 });
 
 const horizonDays = computed(() => overview.value?.horizonDays ?? 7);
-const scenarioCosts = computed(() => {
+const breakdown = computed(() => {
   const r = props.row;
-  return props.model.scenarios
-    .filter((s) => s.name !== "actual")
-    .map((s) => {
-      const perM = (1 - s.h) * r.pIn + s.h * r.pCache + s.r * r.pOut;
-      return {
-        name: s.name,
-        label: `${scenarioLabel(s.name)} · ${volume(s.inputPerDay)}/day`,
-        current: s.name === overview.value?.scenario.name,
-        perM,
-        horizon: (perM * s.inputPerDay * horizonDays.value) / 1_000_000,
-      };
-    });
+  const p = props.model.profile;
+  const scale = (p.inputPerDay * horizonDays.value) / 1_000_000;
+  const parts = [
+    { label: p.h > 0 ? "Input (uncached)" : "Input", perM: (1 - p.h) * r.pIn, total: false },
+    ...(p.h > 0 ? [{ label: "Cache read", perM: p.h * r.pCache, total: false }] : []),
+    { label: "Output", perM: p.r * r.pOut, total: false },
+  ];
+  return [...parts, { label: "Total", perM: r.costPerM, total: true }].map((x) => ({ ...x, horizon: x.perM * scale }));
 });
+const volumeLabel = computed(() => `${volume(props.model.profile.inputPerDay)} input / day`);
+
+const pickable = computed(() => props.row.eligible || props.row.presetRank !== null);
+const pickReason = computed(() => (props.row.eligible ? null : (reasons.value[0]?.text ?? "Not eligible")));
+const onPick = () => {
+  if (props.preset) togglePick(props.preset, props.row.tag, pickReason.value);
+};
 
 const series = computed(() => props.history.filter((p) => p.tag === props.row.tag));
 const outSeries = computed(() => series.value.map((p) => p.pOut));
@@ -136,12 +140,23 @@ const cell = "px-2.5 text-right";
     :style="{ gridTemplateColumns: template, height }"
   >
     <div class="sticky left-0 z-[1] flex h-full items-center gap-2 border-r border-border bg-card pl-2 pr-3">
+      <button
+        v-if="preset"
+        type="button"
+        :aria-pressed="row.presetRank !== null"
+        :title="row.presetRank !== null ? 'In the preset — click to remove' : pickable ? 'Add to the preset' : (pickReason ?? '')"
+        :class="cn('tnum grid size-[18px] flex-none place-items-center rounded border text-[11px] font-semibold', row.presetRank !== null ? 'border-primary bg-primary text-primary-foreground' : 'border-border', !pickable && 'opacity-35')"
+        @click="onPick"
+      >
+        {{ row.presetRank ?? "" }}
+      </button>
+      <span v-else class="size-[18px] flex-none"></span>
       <button type="button" class="grid size-[22px] flex-none place-items-center rounded-md text-muted-foreground hover:bg-accent" @click="$emit('toggle')">
         <svg :class="cn('size-3.5 transition-transform', open && 'rotate-90')" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="m9 18 6-6-6-6"></path>
         </svg>
       </button>
-      <span :class="cn('tnum w-[22px] text-right font-semibold', row.presetRank === null && 'font-normal text-muted-foreground', dim && 'line-through')">{{ rankText }}</span>
+      <span :class="cn('tnum w-[22px] text-right text-muted-foreground', dim && 'line-through')">{{ position }}</span>
       <div :class="cn('flex min-w-0 flex-col pl-1 leading-tight', dim && 'opacity-45')">
         <span class="font-medium">{{ row.providerName }}</span>
         <span class="font-mono text-[11px] text-muted-foreground">{{ row.tag }}</span>
@@ -200,15 +215,15 @@ const cell = "px-2.5 text-right";
   <div v-if="open" class="w-max min-w-full border-b border-border bg-muted">
     <div class="sticky left-0 grid w-[min(1120px,calc(100vw-90px))] grid-cols-[1.1fr_.9fr_1.2fr] gap-6 whitespace-normal py-3.5 pl-12 pr-4">
       <div>
-        <div class="mb-1.5 text-xs font-semibold">Cost by scenario</div>
+        <div class="mb-1.5 text-xs font-semibold">Cost at this workload <span class="font-normal text-muted-foreground">· {{ volumeLabel }}</span></div>
         <div class="tnum grid grid-cols-[1fr_auto_auto] gap-x-[18px] gap-y-1 text-[12.5px]">
-          <span class="text-[11.5px] text-muted-foreground">Scenario</span>
+          <span class="text-[11.5px] text-muted-foreground">Part</span>
           <span class="text-right text-[11.5px] text-muted-foreground">per 1M in</span>
           <span class="text-right text-[11.5px] text-muted-foreground">per {{ periodLabel(horizonDays) }}</span>
-          <template v-for="s in scenarioCosts" :key="s.name">
-            <span :class="s.current && 'font-semibold'">{{ s.label }}</span>
-            <span :class="['text-right', s.current && 'font-semibold']">{{ money(s.perM) }}</span>
-            <span :class="['text-right', s.current && 'font-semibold']">{{ money(s.horizon) }}</span>
+          <template v-for="x in breakdown" :key="x.label">
+            <span :class="x.total && 'font-semibold'">{{ x.label }}</span>
+            <span :class="['text-right', x.total && 'font-semibold']">{{ money(x.perM) }}</span>
+            <span :class="['text-right', x.total && 'font-semibold']">{{ money(x.horizon) }}</span>
           </template>
         </div>
       </div>

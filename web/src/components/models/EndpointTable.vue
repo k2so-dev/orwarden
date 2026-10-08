@@ -1,12 +1,12 @@
 <script setup lang="ts" vapor>
 import { computed } from "vue";
-import type { EndpointView, ModelView } from "@/lib/api";
+import type { EndpointView, ModelView, PresetView } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { ensureHistory, historyCache } from "@/stores/data";
 import { columns, DEFAULT_SORT, density, openRows, sortBy, sortStates, toggleIn } from "@/stores/ui";
 import EndpointRow from "./EndpointRow.vue";
 
-const props = defineProps<{ model: ModelView; horizonLabel: string }>();
+const props = defineProps<{ model: ModelView; horizonLabel: string; preset?: PresetView }>();
 
 type SortKey = "rank" | "in" | "out" | "cache" | "disc" | "om" | "up" | "tps" | "lat" | "share" | "perM" | "hz" | "vs" | "overall" | "verdict" | "ban";
 
@@ -52,7 +52,7 @@ const rows = computed(() => {
 
 const template = computed(() => {
   const c = columns.value;
-  const parts = ["236px", "76px"];
+  const parts = ["268px", "76px"];
   if (c.zt) parts.push("46px", "50px");
   parts.push("62px", "62px", "70px", "66px", "70px", "116px", "60px");
   if (c.lat) parts.push("64px");
@@ -106,7 +106,7 @@ const indicator = (key: string | null) => (key && sortState.value.key === key ? 
       :style="{ gridTemplateColumns: template }"
     >
       <div class="sticky left-0 z-[2] flex h-full items-center gap-2.5 border-r border-border bg-muted px-3">
-        <button type="button" class="w-[52px] text-right hover:text-foreground" title="Bold: position in the saved preset · grey: rank by score among the rest" @click="sortBy(model.slug, 'rank')">#{{ indicator("rank") }}</button>
+        <button type="button" class="w-[86px] text-right hover:text-foreground" title="Tick rows to compose the preset · # is the position in the preset, then the rank by score" @click="sortBy(model.slug, 'rank')">Preset #{{ indicator("rank") }}</button>
         <span>Provider · endpoint</span>
       </div>
       <template v-for="h in HEADERS" :key="h.label">
@@ -129,6 +129,7 @@ const indicator = (key: string | null) => (key && sortState.value.key === key ? 
       :height="height"
       :open="openRows.has(rowKey(r.id))"
       :history="history"
+      :preset="preset"
       @toggle="toggle(r.id)"
     />
   </div>

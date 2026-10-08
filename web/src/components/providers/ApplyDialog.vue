@@ -4,7 +4,7 @@ import type { ApplyResult } from "@/lib/api";
 import { AlertDialog, AlertDialogContent, AlertDialogDescription, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { periodLabel, signedMoney } from "@/lib/format";
 import { status } from "@/stores/data";
-import { filters, scenarioLabel } from "@/stores/filters";
+import { workloadLabel } from "@/stores/workload";
 
 const props = defineProps<{ plan: ApplyResult | null; dryRun: boolean; busy: boolean }>();
 const emit = defineEmits<{ confirm: [] }>();
@@ -17,7 +17,7 @@ const effect = computed(() => {
   if (!p) return "";
   const c = p.cost;
   const money = c.blocked ? "leaves a model with no provider" : signedMoney(c.after - c.before);
-  return `${p.added.length} added · ${p.removed.length} removed · ${money} / ${periodLabel(c.days)} across selected models (${scenarioLabel(filters.value.scenario).toLowerCase()})`;
+  return `${p.added.length} added · ${p.removed.length} removed · ${money} / ${periodLabel(c.days)} across selected models (${workloadLabel().toLowerCase()})`;
 });
 
 type Line = { key: string; sign: string; text: string; cls: string };

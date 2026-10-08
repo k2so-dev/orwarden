@@ -1,18 +1,19 @@
 <script setup lang="ts" vapor>
 import { computed } from "vue";
 import ConnectKey from "@/components/shell/ConnectKey.vue";
-import FilterBar from "@/components/shell/FilterBar.vue";
+import WorkloadBar from "@/components/shell/WorkloadBar.vue";
 import HeaderBar from "@/components/shell/HeaderBar.vue";
 import SettingsSheet from "@/components/settings/SettingsSheet.vue";
 import { ago, periodLabel } from "@/lib/format";
 import { clock } from "@/stores/ui";
 import { cn } from "@/lib/utils";
-import { filters, scenarioLabel } from "@/stores/filters";
+import { localView } from "@/stores/filters";
+import { view, workloadLabel } from "@/stores/workload";
+import { pendingSync, presetSummary, syncAll, syncBusy } from "@/lib/presetActions";
 import { go, tab, TABS } from "@/stores/nav";
-import { hasData, loading, loadError, overview, presets, providers, refreshing, refreshNow, status } from "@/stores/data";
+import { dryRun, hasData, loading, loadError, overview, presetsFailed, providers, refreshing, refreshNow, status, writeBlocked } from "@/stores/data";
 import { settingsOpen } from "@/stores/ui";
 import ModelsTab from "@/views/ModelsTab.vue";
-import PresetsTab from "@/views/PresetsTab.vue";
 import ProvidersTab from "@/views/ProvidersTab.vue";
 
 const noKey = computed(() => status.value !== null && status.value.health === "no-key");
@@ -27,15 +28,13 @@ const noData = computed(() => !skeleton.value && !ready.value);
 const counts = computed(() => ({
   models: overview.value?.models.length ?? 0,
   providers: providers.value?.rows.length ?? 0,
-  presets: presets.value?.length ?? 0,
 }));
 const pendingBans = computed(() => (providers.value?.pending.added.length ?? 0) + (providers.value?.pending.removed.length ?? 0) > 0);
 
 const context = computed(() => {
-  const f = filters.value;
-  const scenario = scenarioLabel(f.scenario);
-  const volume = f.scenario === "actual" ? "actual volume" : `${f.volumeM}M input / day`;
-  return `${scenario} · ${volume} · ${periodLabel(f.days)} · ${f.minQuant}+ · uptime ≥ ${f.minUptime}%${f.zdrOnly ? " · ZDR only" : ""}`;
+  const v = view.value;
+  const volume = v.actual ? "actual volume" : `${v.volumeM}M input / day`;
+  return `${workloadLabel()} · ${volume} · ${periodLabel(localView.value.days)} · ${v.minQuant}+ · uptime ≥ ${v.minUptime}%${v.zdrOnly ? " · ZDR only" : ""}`;
 });
 
 const tabLabel = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
@@ -47,7 +46,7 @@ const alertBox = "flex items-start gap-3 rounded-[10px] border border-bad bg-bad
     <HeaderBar />
     <ConnectKey v-if="noKey" />
     <template v-else>
-      <FilterBar />
+      <WorkloadBar />
       <main class="mx-auto flex max-w-[1840px] flex-col gap-4 px-5 pb-[72px] pt-4">
         <div v-if="unreachable" role="alert" :class="alertBox">
           <svg class="mt-0.5 size-4 flex-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -90,7 +89,20 @@ const alertBox = "flex items-start gap-3 rounded-[10px] border border-bad bg-bad
               <span v-if="t === 'providers' && pendingBans" class="size-1.5 rounded-full bg-warn"></span>
             </button>
           </div>
-          <div class="text-[12.5px] text-muted-foreground">{{ context }}</div>
+          <div v-if="tab === 'models' && ready" class="flex items-center gap-3">
+            <span class="text-[12.5px] text-muted-foreground">{{ presetsFailed ? "Preset status unavailable" : presetSummary }}</span>
+            <button
+              type="button"
+              :disabled="syncBusy || (!dryRun && writeBlocked !== null)"
+              :title="!dryRun && writeBlocked ? writeBlocked : undefined"
+              class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-background px-3 text-[13px] font-medium hover:bg-accent disabled:cursor-wait disabled:opacity-60"
+              @click="syncAll"
+            >
+              <svg :class="['size-3.5', syncBusy && 'animate-spin']" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path><path d="M21 3v5h-5"></path></svg>
+              {{ dryRun ? "Preview sync" : pendingSync.length ? `Sync ${pendingSync.length} preset${pendingSync.length === 1 ? "" : "s"}` : "All presets synced" }}
+            </button>
+          </div>
+          <div v-else class="text-[12.5px] text-muted-foreground">{{ context }}</div>
         </div>
         <template v-if="skeleton">
           <div class="grid grid-cols-4 gap-3">
@@ -114,8 +126,7 @@ const alertBox = "flex items-start gap-3 rounded-[10px] border border-bad bg-bad
         </div>
         <template v-else>
           <ModelsTab v-if="tab === 'models'" />
-          <ProvidersTab v-else-if="tab === 'providers'" />
-          <PresetsTab v-else />
+          <ProvidersTab v-else />
         </template>
       </main>
     </template>

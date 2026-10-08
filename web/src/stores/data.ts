@@ -12,7 +12,7 @@ import {
   type Settings,
   type Status,
 } from "@/lib/api";
-import { filters, setWeights, viewQuery } from "./filters";
+import { viewQuery } from "./filters";
 import { notify } from "./toast";
 
 export const authenticated = ref<boolean | null>(null);
@@ -36,36 +36,6 @@ export const writeBlocked = computed(() => {
   return null;
 });
 export const presetsByModel = computed(() => new Map((presets.value ?? []).map((p) => [p.model, p])));
-
-function savedView(s: Settings) {
-  return {
-    minQuant: s.filters.minQuantization,
-    minUptime: Number((s.filters.minUptime * 100).toFixed(4)),
-    zdrOnly: s.filters.zdrOnly,
-    wPrice: s.scoring.price,
-    wSpeed: s.scoring.speed,
-    wReliability: s.scoring.reliability,
-  };
-}
-
-export const uptimeFloor = computed(() => Math.min(90, Math.floor((settings.value?.filters.minUptime ?? 0.9) * 100)));
-
-export const viewDiffers = computed(() => {
-  const s = settings.value;
-  if (!s) return false;
-  const f = filters.value;
-  const saved = savedView(s);
-  return (Object.keys(saved) as (keyof typeof saved)[]).some((k) =>
-    typeof saved[k] === "number" ? Math.abs((f[k] as number) - (saved[k] as number)) > 1e-4 : f[k] !== saved[k],
-  );
-});
-
-export function resetViewToSaved(): void {
-  if (!settings.value) return;
-  const saved = savedView(settings.value);
-  Object.assign(filters.value, { minQuant: saved.minQuant, minUptime: saved.minUptime, zdrOnly: saved.zdrOnly });
-  setWeights({ price: saved.wPrice, speed: saved.wSpeed, reliability: saved.wReliability });
-}
 
 export function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -182,34 +152,6 @@ export async function act<T>(task: () => Promise<T>, success?: string, desc?: st
     notify("Write failed", message(err), "err");
     return null;
   }
-}
-
-export const savingDefaults = ref(false);
-
-export async function saveViewAsDefaults(): Promise<void> {
-  if (savingDefaults.value) return;
-  savingDefaults.value = true;
-  const f = filters.value;
-  const s = settings.value;
-  const uptimeChanged = !s || Math.abs(f.minUptime - savedView(s).minUptime) > 1e-4;
-  const res = await act(
-    () =>
-      unwrap(
-        client.settings.$put({
-          json: {
-            filters: { minQuantization: f.minQuant, minUptime: uptimeChanged ? f.minUptime / 100 : undefined, zdrOnly: f.zdrOnly },
-            scoring: { price: f.wPrice, speed: f.wSpeed, reliability: f.wReliability },
-          },
-        }),
-      ),
-    "Saved as defaults",
-    "Presets and auto-sync use these rules; quant and uptime also drive scheduled bans",
-  );
-  if (res) {
-    settings.value = res;
-    await reloadAfterWrite();
-  }
-  savingDefaults.value = false;
 }
 
 export function previewOnly(): void {

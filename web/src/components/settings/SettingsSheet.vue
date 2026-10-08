@@ -8,7 +8,7 @@ import { client, unwrap, type Settings } from "@/lib/api";
 import { inDays } from "@/lib/format";
 import { act, loadAll, refreshNow, reloadAfterWrite, settings, status } from "@/stores/data";
 import { notify } from "@/stores/toast";
-import { QUANT_OPTIONS, scenarioLabel } from "@/stores/filters";
+import { QUANT_OPTIONS } from "@/stores/filters";
 import { confirmAction, confirmRequest } from "@/stores/confirm";
 import { clock, settingsOpen } from "@/stores/ui";
 import Toggle from "@/components/app/Toggle.vue";
@@ -85,15 +85,8 @@ const rankBy = computed({
     if (draft.value) draft.value.presets.rankBy = v as Settings["presets"]["rankBy"];
   },
 });
-const scenarioOptions = computed(() => {
-  const names = ["actual", ...(s.value?.scenarios.profiles.map((p) => p.name) ?? [])];
-  const saved = s.value?.presets.defaultScenario;
-  return saved && !names.includes(saved) ? [...names, saved] : names;
-});
-const scenarioSelect = computed(() => scenarioOptions.value.map((name) => ({ value: name, label: missingScenario(name) ? `${name} (deleted, ranks as actual)` : scenarioLabel(name) })));
 const quantOptions = QUANT_OPTIONS.map((q) => ({ value: q.value, label: q.value }));
 const workspaceOptions = computed(() => workspaces.value.map((w) => ({ value: w.id, label: w.name })));
-const missingScenario = (name: string) => !!s.value && name !== "actual" && !s.value.scenarios.profiles.some((p) => p.name === name);
 const keyLabel = computed(() => status.value?.key.label ?? (status.value?.key.source === "env" ? "set from environment" : "not set"));
 
 function addException() {
@@ -322,11 +315,6 @@ const btn = "h-8 rounded-lg border border-border bg-background px-3 text-[13px] 
             <div class="text-xs text-muted-foreground">order of providers inside a preset</div>
           </div>
           <Segmented v-model="rankBy" :options="RANK_OPTIONS" size="sm" />
-          <div>
-            <div class="font-medium">Workload</div>
-            <div class="text-xs text-muted-foreground">traffic profile used to rank presets</div>
-          </div>
-          <SelectBox v-model="s.presets.defaultScenario" :options="scenarioSelect" class="w-[180px]" />
           <div>
             <div class="font-medium">Naming pattern</div>
             <div class="text-xs text-muted-foreground">ids of presets synced from here never change; all others follow the new pattern</div>

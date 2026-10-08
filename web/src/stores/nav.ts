@@ -1,6 +1,6 @@
 import { computed, ref } from "vue";
 
-export const TABS = ["models", "providers", "presets"] as const;
+export const TABS = ["models", "providers"] as const;
 export type Tab = (typeof TABS)[number];
 
 const path = ref(window.location.pathname);
