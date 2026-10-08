@@ -25,9 +25,10 @@ const banCount = computed(() => `${providers.value?.pending.desired.length ?? 0}
 const presetSub = computed(() => {
   const s = summary.value;
   if (!s) return "";
-  const noPreset = models.value.filter((m) => m.cost.preset === null).map((m) => m.name);
+  const unbuilt = models.value.filter((m) => m.presetId !== null && m.cost.preset === null).map((m) => m.name);
   const saving = s.default - s.presets;
-  return `${saving >= 0 ? "saves" : "costs"} ${money(Math.abs(saving))} ${saving >= 0 ? "vs" : "more than"} default${noPreset.length ? ` · ${noPreset.length === 1 ? noPreset[0] : `${noPreset.length} models`} at ban routing` : ""}`;
+  const note = unbuilt.length ? ` · ${unbuilt.length === 1 ? unbuilt[0] : `${unbuilt.length} models`} without a buildable preset, counted at ban routing` : "";
+  return `${saving >= 0 ? "saves" : "costs"} ${money(Math.abs(saving))} ${saving >= 0 ? "vs" : "more than"} default${note}`;
 });
 const defaultTip = [
   { text: "OpenRouter splits traffic across endpoints by its own load balancing. Shares are estimated from each endpoint's price and uptime, the way OpenRouter weights them, not from your recorded traffic.", tone: "fg" as const },
