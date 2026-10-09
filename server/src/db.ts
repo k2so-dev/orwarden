@@ -32,6 +32,16 @@ export type PresetSettings = {
   syncedAt: string | null;
 };
 
+export const HISTORY_DAYS = 30;
+
+export type PriceKind = "baseline" | "added" | "changed" | "removed";
+
+export type PricedEndpoint = { tag: string; pIn: number; pOut: number; pCache: number; quantization: string };
+
+export type PriceEvent = PricedEndpoint & { ts: string; model: string; slot: number; kind: PriceKind };
+
+export type EndpointState = PricedEndpoint & { model: string; slot: number; firstSeen: string; lastSeen: string };
+
 export type HistoryPoint = {
   ts: string;
   tag: string;
@@ -51,6 +61,17 @@ create table if not exists endpoint_history (
   p_in real not null, p_out real not null, p_cache real not null, uptime real not null, tps real
 );
 create index if not exists endpoint_history_model on endpoint_history (model, ts);
+create table if not exists price_events (
+  ts text not null, model text not null, tag text not null, slot integer not null, kind text not null,
+  p_in real not null, p_out real not null, p_cache real not null, quantization text not null
+);
+create index if not exists price_events_model on price_events (model, ts);
+create table if not exists endpoint_state (
+  model text not null, tag text not null, slot integer not null,
+  p_in real not null, p_out real not null, p_cache real not null, quantization text not null,
+  first_seen text not null, last_seen text not null,
+  primary key (model, tag, slot)
+);
 create table if not exists provider_state (
   provider text primary key, auto_banned integer not null, ban_streak integer not null, clean_streak integer not null
 );
@@ -135,8 +156,14 @@ export class Store {
   constructor(path: string) {
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
     this.db = new Database(path, { create: true, strict: true });
+    if (this.db.query<{ auto_vacuum: number }, []>("pragma auto_vacuum").get()?.auto_vacuum !== 2) {
+      this.db.exec("pragma auto_vacuum = incremental;");
+      this.db.exec("vacuum;");
+    }
     this.db.exec("pragma journal_mode = wal;");
     this.db.exec(SCHEMA);
+    const columns = this.db.query<{ name: string }, []>("pragma table_info(endpoint_history)").all();
+    if (!columns.some((c) => c.name === "verdict")) this.db.exec("alter table endpoint_history add column verdict text;");
   }
 
   getValue<T>(key: string): T | null {
@@ -179,15 +206,84 @@ export class Store {
     return row ? (JSON.parse(row.data) as T) : null;
   }
 
-  addHistory(ts: string, rows: { model: string; tag: string; pIn: number; pOut: number; pCache: number; uptime: number; tps: number | null }[], keepDays = 30): void {
+  addHistory(
+    ts: string,
+    rows: { model: string; tag: string; pIn: number; pOut: number; pCache: number; uptime: number; tps: number | null; verdict?: string | null }[],
+    keepDays = HISTORY_DAYS,
+  ): void {
     this.db.transaction(() => {
       const insert = this.db.query(
-        "insert into endpoint_history (ts, model, tag, p_in, p_out, p_cache, uptime, tps) values ($ts, $model, $tag, $pIn, $pOut, $pCache, $uptime, $tps)",
+        "insert into endpoint_history (ts, model, tag, p_in, p_out, p_cache, uptime, tps, verdict) values ($ts, $model, $tag, $pIn, $pOut, $pCache, $uptime, $tps, $verdict)",
       );
-      for (const r of rows) insert.run({ ts, ...r });
+      for (const r of rows) insert.run({ ts, ...r, verdict: r.verdict ?? null });
       const cutoff = new Date(Date.parse(ts) - keepDays * 86_400_000).toISOString();
       this.db.query("delete from endpoint_history where ts < ?").run(cutoff);
     })();
+    this.db.exec("pragma incremental_vacuum;");
+  }
+
+  recordPrices(ts: string, models: { slug: string; endpoints: PricedEndpoint[] }[], keepDays = HISTORY_DAYS): PriceEvent[] {
+    const events: PriceEvent[] = [];
+    this.db.transaction(() => {
+      const insert = this.db.query(
+        "insert into price_events (ts, model, tag, slot, kind, p_in, p_out, p_cache, quantization) values ($ts, $model, $tag, $slot, $kind, $pIn, $pOut, $pCache, $quantization)",
+      );
+      const upsert = this.db.query(
+        `insert into endpoint_state (model, tag, slot, p_in, p_out, p_cache, quantization, first_seen, last_seen)
+         values ($model, $tag, $slot, $pIn, $pOut, $pCache, $quantization, $firstSeen, $ts)
+         on conflict(model, tag, slot) do update set p_in = excluded.p_in, p_out = excluded.p_out, p_cache = excluded.p_cache,
+           quantization = excluded.quantization, last_seen = excluded.last_seen`,
+      );
+      const firstHistory = this.db.query<{ ts: string | null }, [string, string]>("select min(ts) as ts from endpoint_history where model = ? and tag = ?");
+      const emit = (e: Omit<PriceEvent, "ts">) => {
+        insert.run({ ts, model: e.model, tag: e.tag, slot: e.slot, kind: e.kind, pIn: e.pIn, pOut: e.pOut, pCache: e.pCache, quantization: e.quantization });
+        events.push({ ...e, ts });
+      };
+      for (const m of models) {
+        const known = new Map(this.endpointStates(m.slug).map((s) => [`${s.tag}\u0000${s.slot}`, s]));
+        const fresh = known.size === 0;
+        const slots = new Map<string, number>();
+        for (const e of m.endpoints) {
+          const slot = slots.get(e.tag) ?? 0;
+          slots.set(e.tag, slot + 1);
+          const key = `${e.tag}\u0000${slot}`;
+          const prev = known.get(key);
+          known.delete(key);
+          const row = { model: m.slug, tag: e.tag, slot, pIn: e.pIn, pOut: e.pOut, pCache: e.pCache, quantization: e.quantization };
+          if (!prev) emit({ ...row, kind: fresh ? "baseline" : "added" });
+          else if (prev.pIn !== e.pIn || prev.pOut !== e.pOut || prev.pCache !== e.pCache || prev.quantization !== e.quantization) emit({ ...row, kind: "changed" });
+          const firstSeen = prev?.firstSeen ?? (fresh ? (firstHistory.get(m.slug, e.tag)?.ts ?? ts) : ts);
+          upsert.run({ ...row, firstSeen: firstSeen < ts ? firstSeen : ts, ts });
+        }
+        for (const gone of known.values()) {
+          emit({ model: m.slug, tag: gone.tag, slot: gone.slot, kind: "removed", pIn: gone.pIn, pOut: gone.pOut, pCache: gone.pCache, quantization: gone.quantization });
+          this.db.query("delete from endpoint_state where model = ? and tag = ? and slot = ?").run(m.slug, gone.tag, gone.slot);
+        }
+      }
+      const cutoff = new Date(Date.parse(ts) - keepDays * 86_400_000).toISOString();
+      this.db.query("delete from endpoint_state where last_seen < ?").run(cutoff);
+      this.db
+        .query(
+          `delete from price_events where ts < $cutoff and (
+             rowid not in (select max(rowid) from price_events where ts < $cutoff group by model, tag, slot)
+             or not exists (select 1 from endpoint_state s where s.model = price_events.model and s.tag = price_events.tag and s.slot = price_events.slot)
+           )`,
+        )
+        .run({ cutoff });
+    })();
+    return events;
+  }
+
+  endpointStates(model?: string): EndpointState[] {
+    const sql = `select model, tag, slot, p_in as pIn, p_out as pOut, p_cache as pCache, quantization, first_seen as firstSeen, last_seen as lastSeen
+                 from endpoint_state ${model === undefined ? "" : "where model = ?"} order by model, tag, slot`;
+    return model === undefined ? this.db.query<EndpointState, []>(sql).all() : this.db.query<EndpointState, [string]>(sql).all(model);
+  }
+
+  priceEvents(since: string, model?: string): PriceEvent[] {
+    const sql = `select ts, model, tag, slot, kind, p_in as pIn, p_out as pOut, p_cache as pCache, quantization
+                 from price_events where ts >= ? ${model === undefined ? "" : "and model = ?"} order by ts, model, tag, slot`;
+    return model === undefined ? this.db.query<PriceEvent, [string]>(sql).all(since) : this.db.query<PriceEvent, [string, string]>(sql).all(since, model);
   }
 
   history(model: string, since: string): HistoryPoint[] {

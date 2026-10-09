@@ -124,12 +124,14 @@ export async function refresh(rt: Runtime, scheduled = false): Promise<RefreshRe
     const client = await rt.client();
     const snapshot = await takeSnapshot(client, rt);
     rt.setSnapshot(snapshot);
+    const classified = classifyAll(snapshot.models, settings);
     rt.store.addHistory(
       snapshot.takenAt,
-      snapshot.models.flatMap((m) =>
-        m.endpoints.map((e) => ({ model: m.slug, tag: e.tag, pIn: e.pIn, pOut: e.pOut, pCache: e.pCache, uptime: e.uptime, tps: e.tps })),
+      snapshot.models.flatMap((m, i) =>
+        m.endpoints.map((e, j) => ({ model: m.slug, tag: e.tag, pIn: e.pIn, pOut: e.pOut, pCache: e.pCache, uptime: e.uptime, tps: e.tps, verdict: classified[i]?.endpoints[j]?.cls ?? null })),
       ),
     );
+    rt.store.recordPrices(snapshot.takenAt, snapshot.models);
     if (!rt.store.getValue<boolean>("policies_imported")) {
       const current = sorted((snapshot.guardrail.ignored_providers ?? []).map((p) => p.toLowerCase()));
       rt.store.replaceBanPolicies(current, startedAt);
