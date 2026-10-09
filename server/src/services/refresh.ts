@@ -132,6 +132,7 @@ export async function refresh(rt: Runtime, scheduled = false): Promise<RefreshRe
       ),
     );
     rt.store.recordPrices(snapshot.takenAt, snapshot.models);
+    rt.invalidateHistory();
     if (!rt.store.getValue<boolean>("policies_imported")) {
       const current = sorted((snapshot.guardrail.ignored_providers ?? []).map((p) => p.toLowerCase()));
       rt.store.replaceBanPolicies(current, startedAt);

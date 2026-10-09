@@ -43,7 +43,7 @@ export async function remoteStatus(rt: Runtime, slugs: string[], fresh = false):
 }
 
 export function presetContext(rt: Runtime, q: ViewQuery) {
-  return { snapshot: rt.requireSnapshot(), settings: rt.settings(), q, bans: rt.banInputs(), presets: rt.store.presetSettings() };
+  return { snapshot: rt.requireSnapshot(), settings: rt.settings(), q, bans: rt.banInputs(), presets: rt.store.presetSettings(), history: rt.historyInputs() };
 }
 
 export async function listPresets(rt: Runtime, q: ViewQuery, fresh = false): Promise<PresetView[]> {

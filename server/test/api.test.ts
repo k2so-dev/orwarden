@@ -98,6 +98,10 @@ describe("api flow", () => {
     expect(ranked.length).toBeLessThanOrEqual(5);
     expect(ranked.every((e: any) => e.verdict === "ok" && e.tools)).toBe(true);
     expect(m.scenarios.map((s: any) => s.name)).toContain("reasoning");
+    expect(m.endpoints[0].stability.ageDays).toBe(0);
+    expect(m.endpoints[0].stability.isNew).toBe(true);
+    expect(m.endpoints[0].scores.stability).toBe(50);
+    expect(ctx.store.priceEvents("").every((e) => e.kind === "baseline")).toBe(true);
   });
 
   test("manual ban policy is applied and can be rolled back", async () => {

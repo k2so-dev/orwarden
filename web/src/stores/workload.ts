@@ -13,7 +13,7 @@ export type ViewPatch = Partial<{
   minQuant: string;
   zdrOnly: boolean;
   minUptime: number;
-  weights: { price: number; speed: number; reliability: number };
+  weights: { price: number; speed: number; reliability: number; stability: number };
 }>;
 
 export const view = computed(() => {
@@ -27,7 +27,12 @@ export const view = computed(() => {
     minQuant: s?.filters.minQuantization ?? "fp8",
     zdrOnly: s?.filters.zdrOnly ?? false,
     minUptime: Number(((s?.filters.minUptime ?? 0.97) * 100).toFixed(4)),
-    weights: { price: s?.scoring.price ?? DEFAULT_WEIGHTS.price, speed: s?.scoring.speed ?? DEFAULT_WEIGHTS.speed, reliability: s?.scoring.reliability ?? DEFAULT_WEIGHTS.reliability },
+    weights: {
+      price: s?.scoring.price ?? DEFAULT_WEIGHTS.price,
+      speed: s?.scoring.speed ?? DEFAULT_WEIGHTS.speed,
+      reliability: s?.scoring.reliability ?? DEFAULT_WEIGHTS.reliability,
+      stability: s?.scoring.stability ?? DEFAULT_WEIGHTS.stability,
+    },
     days: localView.value.days,
     hideBanned: localView.value.hideBanned,
   };
@@ -65,7 +70,7 @@ function body(s: Settings) {
   return {
     workload: s.workload,
     filters: { requireTools: s.filters.requireTools, minQuantization: s.filters.minQuantization, zdrOnly: s.filters.zdrOnly, minUptime: s.filters.minUptime },
-    scoring: { price: s.scoring.price, speed: s.scoring.speed, reliability: s.scoring.reliability },
+    scoring: { price: s.scoring.price, speed: s.scoring.speed, reliability: s.scoring.reliability, stability: s.scoring.stability },
   };
 }
 
@@ -107,7 +112,7 @@ async function undo(before: Settings): Promise<void> {
     minQuant: before.filters.minQuantization,
     zdrOnly: before.filters.zdrOnly,
     minUptime: before.filters.minUptime * 100,
-    weights: { price: before.scoring.price, speed: before.scoring.speed, reliability: before.scoring.reliability },
+    weights: { price: before.scoring.price, speed: before.scoring.speed, reliability: before.scoring.reliability, stability: before.scoring.stability },
   });
   settings.value = restored;
   const res = await put(restored);

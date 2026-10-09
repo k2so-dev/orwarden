@@ -47,7 +47,13 @@ export const SettingsSchema = z.object({
     penalties: z.object({ hardBad: z.number().min(1), outputOutlier: z.number().min(1), cacheOutlier: z.number().min(1) }),
     hysteresis: z.object({ banAfterRuns: z.number().int().min(1), unbanAfterRuns: z.number().int().min(1) }),
   }),
-  scoring: z.object({ price: z.number().min(0), speed: z.number().min(0), reliability: z.number().min(0), unknownQuantPenalty: z.number().min(0).max(100) }),
+  scoring: z.object({
+    price: z.number().min(0),
+    speed: z.number().min(0),
+    reliability: z.number().min(0),
+    stability: z.number().min(0),
+    unknownQuantPenalty: z.number().min(0).max(100),
+  }),
   presets: z.object({
     topN: z.number().int().min(1).max(20),
     slugPattern: z.string().includes("{model}"),
@@ -103,7 +109,7 @@ export const DEFAULT_SETTINGS: Settings = {
     penalties: { hardBad: 3, outputOutlier: 5, cacheOutlier: 1.5 },
     hysteresis: { banAfterRuns: 2, unbanAfterRuns: 3 },
   },
-  scoring: { price: 60, speed: 20, reliability: 20, unknownQuantPenalty: 15 },
+  scoring: { price: 60, speed: 20, reliability: 20, stability: 10, unknownQuantPenalty: 15 },
   presets: { topN: 5, slugPattern: "{model}-safe", defaultScenario: "actual", rankBy: "score", maxPremium: 0.15 },
   scenarios: {
     days: 7,

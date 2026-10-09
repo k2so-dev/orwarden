@@ -46,11 +46,12 @@ const days = computed({ get: () => String(localView.value.days), set: (v: string
 const filterLabel = computed(() => [`${view.value.minQuant}+`, `≥${view.value.minUptime}%`, ...(view.value.zdrOnly ? ["ZDR"] : []), ...(view.value.tools ? ["tools"] : [])].join(" · "));
 
 const weights = computed(() => view.value.weights);
-const weightsLabel = computed(() => `${weights.value.price} / ${weights.value.speed} / ${weights.value.reliability}`);
-const setWeight = (key: "price" | "speed" | "reliability", v: number) => updateView({ weights: { ...weights.value, [key]: v } });
+const weightsLabel = computed(() => `${weights.value.price} / ${weights.value.speed} / ${weights.value.reliability} / ${weights.value.stability}`);
+const setWeight = (key: "price" | "speed" | "reliability" | "stability", v: number) => updateView({ weights: { ...weights.value, [key]: v } });
 const price = computed({ get: () => weights.value.price, set: (v: number) => setWeight("price", v) });
 const speed = computed({ get: () => weights.value.speed, set: (v: number) => setWeight("speed", v) });
 const reliability = computed({ get: () => weights.value.reliability, set: (v: number) => setWeight("reliability", v) });
+const stability = computed({ get: () => weights.value.stability, set: (v: number) => setWeight("stability", v) });
 
 function onVolume(e: Event): void {
   const input = e.target as HTMLInputElement;
@@ -61,13 +62,13 @@ function onVolume(e: Event): void {
 
 type Ranked = { tag: string; name: string; score: number; rank: number };
 
-function rank(w: { price: number; speed: number; reliability: number }): Ranked[] {
+function rank(w: { price: number; speed: number; reliability: number; stability: number }): Ranked[] {
   const m = overview.value?.models[0];
   if (!m) return [];
-  const total = w.price + w.speed + w.reliability || 1;
+  const total = w.price + w.speed + w.reliability + w.stability || 1;
   return m.endpoints
     .filter((e) => e.eligible)
-    .map((e) => ({ tag: e.tag, name: e.providerName, score: (e.scores.price * w.price + e.scores.speed * w.speed + e.scores.reliability * w.reliability) / total, rank: 0 }))
+    .map((e) => ({ tag: e.tag, name: e.providerName, score: (e.scores.price * w.price + e.scores.speed * w.speed + e.scores.reliability * w.reliability + e.scores.stability * w.stability) / total, rank: 0 }))
     .sort((a, b) => b.score - a.score)
     .map((e, i) => ({ ...e, rank: i + 1 }));
 }
@@ -149,12 +150,13 @@ const trigger = "inline-flex h-8 items-center gap-1.5 rounded-lg border border-b
         <PopoverContent align="end" class="flex w-[340px] flex-col gap-3 rounded-[10px] p-3.5">
           <div class="flex items-center justify-between">
             <span class="text-[13px] font-semibold">Efficiency weights</span>
-            <button type="button" class="text-xs text-muted-foreground hover:text-foreground" @click="updateView({ weights: DEFAULT_WEIGHTS })">Reset {{ DEFAULT_WEIGHTS.price }} / {{ DEFAULT_WEIGHTS.speed }} / {{ DEFAULT_WEIGHTS.reliability }}</button>
+            <button type="button" class="text-xs text-muted-foreground hover:text-foreground" @click="updateView({ weights: DEFAULT_WEIGHTS })">Reset {{ DEFAULT_WEIGHTS.price }} / {{ DEFAULT_WEIGHTS.speed }} / {{ DEFAULT_WEIGHTS.reliability }} / {{ DEFAULT_WEIGHTS.stability }}</button>
           </div>
           <div class="grid grid-cols-[80px_1fr_36px] items-center gap-2.5 text-[12.5px]">
             <span>Price</span><RangeSlider v-model="price" :min="0" :max="100" :step="5" /><span class="tnum text-right">{{ weights.price }}</span>
             <span>Speed</span><RangeSlider v-model="speed" :min="0" :max="100" :step="5" /><span class="tnum text-right">{{ weights.speed }}</span>
             <span>Reliability</span><RangeSlider v-model="reliability" :min="0" :max="100" :step="5" /><span class="tnum text-right">{{ weights.reliability }}</span>
+            <span title="Price changes, uptime dips and verdict flips over the last 30 days; new endpoints stay near 50">Stability</span><RangeSlider v-model="stability" :min="0" :max="100" :step="5" /><span class="tnum text-right">{{ weights.stability }}</span>
           </div>
           <div class="flex flex-col gap-1 border-t border-border pt-2.5">
             <div class="mb-0.5 text-xs text-muted-foreground">Live preview · {{ previewModel }} top 5 (vs default weights)</div>

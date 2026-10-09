@@ -14,7 +14,7 @@ export const QUANT_OPTIONS = [
   { value: "bf16", label: "bf16+" },
 ];
 
-export const DEFAULT_WEIGHTS = { price: 60, speed: 20, reliability: 20 };
+export const DEFAULT_WEIGHTS = { price: 60, speed: 20, reliability: 20, stability: 10 };
 
 export const KINDS = {
   agent: { label: "Agent", hint: "High cache reuse, short outputs — tool loops and coding agents" },

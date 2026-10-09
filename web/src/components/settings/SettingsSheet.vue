@@ -120,7 +120,7 @@ async function save(closeAfter = true): Promise<boolean> {
     notify("Fill in every number", `Empty or invalid: ${blank.join(", ")}`, "err");
     return false;
   }
-  if ([d.scoring.price, d.scoring.speed, d.scoring.reliability].some((w) => w > 100)) {
+  if ([d.scoring.price, d.scoring.speed, d.scoring.reliability, d.scoring.stability].some((w) => w > 100)) {
     notify("Weights out of range", "Scoring weights go from 0 to 100.", "err");
     return false;
   }

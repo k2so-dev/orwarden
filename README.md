@@ -24,6 +24,7 @@ orwarden answers one question per model: which providers should serve it, so you
 ### Inputs
 
 - **Snapshot.** On every refresh the server reads the workspace guardrail, your activity and, for every tracked model, all of its endpoints: prices (`p_in`, `p_out`, `p_cache`), quantization, 1-day and 30-minute uptime, throughput, latency, tool support and ZDR.
+- **History.** Each refresh also stores hourly uptime, throughput and verdict per endpoint, and a price event whenever an endpoint appears, disappears or changes price or quantization. History covers tracked models only and is kept for 30 days; the last price before the window is kept so trends have a starting point.
 - **Tracked models.** Models with traffic in the usage window (last `7` completed UTC days, 1–30) plus models you add by hand. Models you remove stay excluded.
 - **Workload.** A model's traffic is described by three numbers:
   - `h` – cache hit ratio, cached input tokens / input tokens;
@@ -70,7 +71,11 @@ Scores run from 0 to 100 and are relative to the eligible endpoints of the same 
 - **Price** = `100 × C_min / C`, where `C_min` is the cheapest eligible endpoint for the selected workload.
 - **Speed** = `100 × (0.7 × tps / tps_max + 0.3 × latency_min / latency)`. An unknown throughput or latency counts as 30%.
 - **Reliability** = `100 × (uptime − 0.9) / 0.1`, clamped to 0–100, with uptime = `0.8 × 1d + 0.2 × 30m`.
-- **Overall** = `(Price × w_price + Speed × w_speed + Reliability × w_rel) / (w_price + w_speed + w_rel)`. Weights are `60 / 20 / 20` by default. For open-weight models, `15` points are subtracted when the quantization is undisclosed.
+- **Stability** comes from the endpoint's own history over the last 30 days, not from other endpoints:
+  - price part = `100 − 200 × (swing − 1) − 5 × changes` (changes capped at 5), where `swing` is the highest blended price `C` divided by the lowest;
+  - uptime part = `100 − 15 × dip days − 5 × verdict flips`, where a dip day has an hourly uptime sample below the minimum uptime;
+  - Stability = average of both parts, clamped to 0–100, pulled towards `50` while the endpoint is younger than 7 days (`50 + (raw − 50) × age / 7`). Endpoints without history score `50`.
+- **Overall** = `(Price × w_price + Speed × w_speed + Reliability × w_rel + Stability × w_stab) / (w_price + w_speed + w_rel + w_stab)`. Weights are `60 / 20 / 20 / 10` by default. For open-weight models, `15` points are subtracted when the quantization is undisclosed.
 
 ### Presets: how the economical list is chosen
 

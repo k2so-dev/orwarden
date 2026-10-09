@@ -274,6 +274,14 @@ export class Store {
     return events;
   }
 
+  historySamples(since: string): { model: string; tag: string; ts: string; uptime: number; verdict: string | null }[] {
+    return this.db
+      .query<{ model: string; tag: string; ts: string; uptime: number; verdict: string | null }, [string]>(
+        "select model, tag, ts, uptime, verdict from endpoint_history where ts >= ? order by ts",
+      )
+      .all(since);
+  }
+
   endpointStates(model?: string): EndpointState[] {
     const sql = `select model, tag, slot, p_in as pIn, p_out as pOut, p_cache as pCache, quantization, first_seen as firstSeen, last_seen as lastSeen
                  from endpoint_state ${model === undefined ? "" : "where model = ?"} order by model, tag, slot`;

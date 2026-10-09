@@ -29,6 +29,7 @@ export const ViewQuerySchema = z.object({
   wPrice: num(0, 100).optional(),
   wSpeed: num(0, 100).optional(),
   wReliability: num(0, 100).optional(),
+  wStability: num(0, 100).optional(),
 });
 
 const PresetSlug = z.string().regex(PRESET_SLUG_RE);
@@ -190,6 +191,7 @@ export function createApp(rt: Runtime) {
           q: resolveQuery(rt.settings(), c.req.valid("query")),
           bans: rt.banInputs(),
           presets: rt.store.presetSettings(),
+          history: rt.historyInputs(),
         }),
       ),
     )
@@ -206,6 +208,7 @@ export function createApp(rt: Runtime) {
           q: resolveQuery(rt.settings(), c.req.valid("query")),
           bans: rt.banInputs(),
           presets: rt.store.presetSettings(),
+          history: rt.historyInputs(),
         }),
       ),
     )
@@ -232,6 +235,7 @@ export function createApp(rt: Runtime) {
           q: resolveQuery(rt.settings(), view),
           bans: rt.banInputs(),
           presets: rt.store.presetSettings(),
+          history: rt.historyInputs(),
         };
         return c.json({
           ...result,

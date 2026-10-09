@@ -3,6 +3,7 @@ import { classifyModel, modelMinQuantization, modelMinQuantRank, quantRank } fro
 import { routingWeight, unitCost } from "../core/cost.ts";
 import { pricePerMillion } from "../core/forecast.ts";
 import type { ProviderState } from "../core/hysteresis.ts";
+import { endpointStability, NEUTRAL_STABILITY, type HistoryInputs, type Stability } from "../core/stability.ts";
 import type { Guardrail } from "../core/openrouter.ts";
 import { admissibleCount, optimize, totalCount, violations, type Violation } from "../core/optimizer.ts";
 import type { ClassifiedEndpoint, ClassifiedModel, Issue, ModelInput } from "../core/types.ts";
@@ -34,6 +35,7 @@ export type ViewQuery = {
   wPrice?: number;
   wSpeed?: number;
   wReliability?: number;
+  wStability?: number;
 };
 
 export type BanInputs = {
@@ -43,7 +45,7 @@ export type BanInputs = {
 
 export type Profile = { name: string; h: number; r: number; tools: boolean; inputPerDay: number; estimated: boolean };
 
-export type Scores = { price: number; speed: number; reliability: number; overall: number };
+export type Scores = { price: number; speed: number; reliability: number; stability: number; overall: number };
 
 export type BanStatus = {
   policy: Policy | null;
@@ -76,6 +78,7 @@ export type EndpointView = {
   costHorizon: number;
   vsBest: number | null;
   scores: Scores;
+  stability: Stability;
   verdict: ClassifiedEndpoint["cls"];
   reasons: string[];
   issues: Issue[];
@@ -212,7 +215,8 @@ export function scoreEndpoints(
   endpoints: ClassifiedEndpoint[],
   profile: Profile,
   pool: ClassifiedEndpoint[],
-  weights: { price: number; speed: number; reliability: number; unknownQuantPenalty?: number },
+  weights: { price: number; speed: number; reliability: number; stability?: number; unknownQuantPenalty?: number },
+  stability?: ReadonlyMap<ClassifiedEndpoint, Stability>,
 ): Map<ClassifiedEndpoint, Scores> {
   const base = pool.length > 0 ? pool : endpoints;
   const costs = base.map((e) => unitCost(e, profile.h, profile.r)).filter((c) => c > 0);
@@ -220,7 +224,8 @@ export function scoreEndpoints(
   const maxTps = Math.max(0, ...base.map((e) => e.tps ?? 0));
   const lats = base.map((e) => e.latencyMs).filter((v): v is number => v !== null && v > 0);
   const minLat = lats.length ? Math.min(...lats) : 0;
-  const total = weights.price + weights.speed + weights.reliability || 1;
+  const wStability = weights.stability ?? 0;
+  const total = weights.price + weights.speed + weights.reliability + wStability || 1;
   const out = new Map<ClassifiedEndpoint, Scores>();
   for (const e of endpoints) {
     const cost = unitCost(e, profile.h, profile.r);
@@ -231,8 +236,9 @@ export function scoreEndpoints(
     const uptime = e.uptime30m === null ? e.uptime : 0.8 * e.uptime + 0.2 * e.uptime30m;
     const reliability = clamp((uptime - 0.9) / 0.1) * 100;
     const penalty = e.quant === "unknown" ? (weights.unknownQuantPenalty ?? 0) : 0;
-    const overall = Math.max(0, (price * weights.price + speed * weights.speed + reliability * weights.reliability) / total - penalty);
-    out.set(e, { price: round(price), speed: round(speed), reliability: round(reliability), overall: round(overall) });
+    const steady = (stability?.get(e) ?? NEUTRAL_STABILITY).score;
+    const overall = Math.max(0, (price * weights.price + speed * weights.speed + reliability * weights.reliability + steady * wStability) / total - penalty);
+    out.set(e, { price: round(price), speed: round(speed), reliability: round(reliability), stability: round(steady), overall: round(overall) });
   }
   return out;
 }
@@ -426,12 +432,14 @@ type Ctx = {
   q: ViewQuery;
   bans: BanInputs;
   presets: ReadonlyMap<string, PresetSettings>;
+  history?: HistoryInputs;
 };
 
 type ModelCalc = {
   model: ClassifiedModel;
   profile: Profile;
   scores: Map<ClassifiedEndpoint, Scores>;
+  stability: Map<ClassifiedEndpoint, Stability>;
   pool: ClassifiedEndpoint[];
   ranked: ClassifiedEndpoint[];
   shares: Map<ClassifiedEndpoint, number>;
@@ -441,7 +449,7 @@ type Basis = {
   settings: Settings;
   q: ViewQuery;
   zdrOnly: boolean;
-  weights: { price: number; speed: number; reliability: number; unknownQuantPenalty: number };
+  weights: { price: number; speed: number; reliability: number; stability: number; unknownQuantPenalty: number };
 };
 
 function viewBasis(ctx: Ctx): Basis {
@@ -454,6 +462,7 @@ function viewBasis(ctx: Ctx): Basis {
       price: ctx.q.wPrice ?? ctx.settings.scoring.price,
       speed: ctx.q.wSpeed ?? ctx.settings.scoring.speed,
       reliability: ctx.q.wReliability ?? ctx.settings.scoring.reliability,
+      stability: ctx.q.wStability ?? ctx.settings.scoring.stability,
       unknownQuantPenalty: ctx.settings.scoring.unknownQuantPenalty,
     },
   };
@@ -473,9 +482,11 @@ function calcModel(input: ModelInput, ctx: Ctx, basis: Basis, current: Set<strin
   const model = classifyModel(input, basis.settings);
   const profile = resolveProfile(input, ctx.settings, basis.q);
   const pool = model.endpoints.filter((e) => isEligible(e, profile, desired, basis.zdrOnly));
-  const scores = scoreEndpoints(model.endpoints, profile, pool, basis.weights);
+  const found = endpointStability(ctx.history, model.slug, model.endpoints, ctx.snapshot.takenAt, profile, basis.settings.filters.minUptime);
+  const stability = new Map(model.endpoints.map((e, i) => [e, found[i]!]));
+  const scores = scoreEndpoints(model.endpoints, profile, pool, basis.weights, stability);
   const ranked = rankForPreset(model, profile, desired, scores, ctx.presets.get(model.slug), ctx.settings.presets.topN, basis.zdrOnly, ctx.settings.presets.rankBy, ctx.settings.presets.maxPremium);
-  return { model, profile, scores, pool, ranked, shares: routingShares(model, current, profile, ctx.settings) };
+  return { model, profile, scores, stability, pool, ranked, shares: routingShares(model, current, profile, ctx.settings) };
 }
 
 function costs(model: ClassifiedModel, ranked: ClassifiedEndpoint[] | null, current: Set<string>, desired: Set<string>, p: Pick<Profile, "h" | "r" | "tools" | "inputPerDay">, days: number, settings: Settings): CostTriple {
@@ -542,7 +553,7 @@ export function buildOverview(ctx: Ctx): Overview {
 
   const models: ModelView[] = snapshot.models.map((input) => {
     const calc = calcModel(input, ctx, view, current, desired);
-    const { model, profile, scores, pool, shares } = calc;
+    const { model, profile, scores, pool, shares, stability } = calc;
     const basis = presetBasis(ctx, input.slug);
     const basisCalc = calcModel(input, ctx, basis, current, desired);
     const presetCalc = hasPreset(input) ? basisCalc : null;
@@ -588,6 +599,7 @@ export function buildOverview(ctx: Ctx): Overview {
           costHorizon: (costPerM * profile.inputPerDay * days) / 1_000_000,
           vsBest: best && best > 0 ? costPerM / best - 1 : null,
           scores: scores.get(e)!,
+          stability: stability.get(e)!,
           verdict: e.cls,
           reasons: e.reasons,
           issues: e.issues,

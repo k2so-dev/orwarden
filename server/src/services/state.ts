@@ -1,5 +1,6 @@
 import { createClient, type OpenRouterApi } from "../core/openrouter.ts";
-import type { Store } from "../db.ts";
+import { slotKey, tagKey, type HistoryInputs, type Sample } from "../core/stability.ts";
+import { HISTORY_DAYS, type PriceEvent, type Store } from "../db.ts";
 import type { Env } from "../env.ts";
 import { DEFAULT_SETTINGS, PRESET_SLUG_RE, mergeSettings, migrateSettings, type Settings } from "../settings.ts";
 import type { Vault } from "../vault.ts";
@@ -36,6 +37,7 @@ export class Runtime {
   private readonly clientFactory: (key: string) => OpenRouterApi;
   private cachedSettings: Settings | null = null;
   private cachedSnapshot: AppSnapshot | null | undefined;
+  private cachedHistory: HistoryInputs | null = null;
   private busy: Promise<unknown> | null = null;
   private cron: { stop(): void } | null = null;
   lastError: { at: string; message: string; status: number | null } | null = null;
@@ -121,6 +123,32 @@ export class Runtime {
   setSnapshot(snapshot: AppSnapshot): void {
     this.store.saveSnapshot(snapshot);
     this.cachedSnapshot = snapshot;
+  }
+
+  historyInputs(): HistoryInputs {
+    if (this.cachedHistory) return this.cachedHistory;
+    const since = new Date(this.now().getTime() - HISTORY_DAYS * 86_400_000).toISOString();
+    const states = new Map(this.store.endpointStates().map((st) => [slotKey(st.model, st.tag, st.slot), st]));
+    const events = new Map<string, PriceEvent[]>();
+    for (const e of this.store.priceEvents("")) {
+      const key = slotKey(e.model, e.tag, e.slot);
+      const list = events.get(key) ?? [];
+      list.push(e);
+      events.set(key, list);
+    }
+    const samples = new Map<string, Sample[]>();
+    for (const row of this.store.historySamples(since)) {
+      const key = tagKey(row.model, row.tag);
+      const list = samples.get(key) ?? [];
+      list.push({ ts: row.ts, uptime: row.uptime, verdict: row.verdict });
+      samples.set(key, list);
+    }
+    this.cachedHistory = { states, events, samples };
+    return this.cachedHistory;
+  }
+
+  invalidateHistory(): void {
+    this.cachedHistory = null;
   }
 
   banInputs(): BanInputs {
