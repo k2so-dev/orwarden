@@ -113,6 +113,16 @@ A preset is built per model from the saved workload, filters and weights, the sa
    - `quantizations` is omitted for closed models and when an endpoint reports a non-standard quantization name.
    - `require_parameters` is set only for tool workloads.
 
+**Keeping a dropped provider while its cache is warm.** Removing a provider from `only` moves its running conversations to another provider, which reads their whole context again at the full input price. So when a sync would drop a provider, orwarden first asks OpenRouter's analytics (`POST /analytics/query`, per minute, by model and provider) whether that provider served the model in the last 15 minutes (the 10-minute sticky window plus reporting lag).
+
+- Used recently: the provider stays in `only`, marked *held*, and is checked again at the next sync.
+- Not used: it goes now, because no conversation is pinned to it any more.
+- Not eligible any more (banned, failed a filter, excluded by hand): it goes now, warm or not.
+- A hold ends after *Keep dropped providers* hours (24 by default) or once the extra spend passes the dollar limit ($1 by default). Extra spend is what the provider was paid since the hold started, times its premium over the most expensive provider of the new list.
+- When analytics cannot be read, a hold stays until its time limit.
+
+Held providers count towards the preset price, because their conversations really pay that price. Analytics are queried only when a sync would drop something.
+
 **Hand-picking.** The numbered tick in the first column of the endpoint table adds or removes an endpoint. After the first change the preset contains exactly the ticked endpoints (still in score order, only eligible ones, at most 20) until you press *Reset to top list*.
 
 **Price of a preset.** OpenRouter picks the provider inside the list, and in practice sends new conversations to one of them, so the preset is priced at its worst case:

@@ -1,7 +1,7 @@
 import { classifyModel } from "../src/core/classify.ts";
 import { normalizeEndpoint } from "../src/core/collect.ts";
 import { DEFAULT_SETTINGS, mergeSettings, type Config } from "../src/settings.ts";
-import type { ActivityRow, Guardrail, OpenRouterApi, Preset, RawEndpoint } from "../src/core/openrouter.ts";
+import type { ActivityRow, AnalyticsQuery, AnalyticsRow, Guardrail, OpenRouterApi, Preset, RawEndpoint } from "../src/core/openrouter.ts";
 import type { ClassifiedModel, Endpoint } from "../src/core/types.ts";
 import fixture from "./fixtures/deepseek-v4.1-flash.json";
 
@@ -58,8 +58,9 @@ export function mockClient(opts: {
   ignored?: string[];
   activity?: ActivityRow[];
   endpoints?: Record<string, RawEndpoint[]>;
+  analytics?: (query: AnalyticsQuery) => AnalyticsRow[];
 }) {
-  const calls = { patches: [] as { id: string; body: unknown }[], presets: [] as { slug: string; config: unknown }[] };
+  const calls = { patches: [] as { id: string; body: unknown }[], presets: [] as { slug: string; config: unknown }[], analytics: [] as AnalyticsQuery[] };
   const presets = new Map<string, Preset>();
   const guardrail: Guardrail = {
     id: "g1",
@@ -108,6 +109,10 @@ export function mockClient(opts: {
       };
       presets.set(slug, preset);
       return preset;
+    },
+    queryAnalytics: async (query) => {
+      calls.analytics.push(structuredClone(query));
+      return opts.analytics?.(query) ?? [];
     },
   };
   return { client, guardrail, calls, presets, endpoints };

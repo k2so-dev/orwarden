@@ -259,6 +259,31 @@ describe("api flow", () => {
     expect(reset.hash).toBe(base.hash);
   });
 
+  test("a dropped provider stays while its cache is warm", async () => {
+    await ctx.call("/api/refresh", { method: "POST", body: {} });
+    const eligible = (await ctx.call("/api/overview")).body.models.find((m: any) => m.slug === DEEPSEEK).endpoints.filter((e: any) => e.eligible);
+    const [keep, warm, cold] = eligible.filter((e: any, i: number) => eligible.findIndex((x: any) => x.providerName === e.providerName) === i);
+    await ctx.call("/api/presets/settings", { method: "PUT", body: { model: DEEPSEEK, picked: [keep.tag, warm.tag, cold.tag] } });
+    await ctx.call("/api/presets/sync", { method: "POST", body: { models: [DEEPSEEK] } });
+    let rows: any[] = [{ created_at__minute: "2026-10-07 11:55:00", model: `${DEEPSEEK}-20260901`, provider: warm.providerName, request_count: "4", total_usage: 0.02 }];
+    ctx.mock.client.queryAnalytics = async () => rows;
+    await ctx.call("/api/presets/settings", { method: "PUT", body: { model: DEEPSEEK, picked: [keep.tag] } });
+    const sync = await ctx.call("/api/presets/sync", { method: "POST", body: { models: [DEEPSEEK] } });
+    expect(sync.body[0].held).toEqual([warm.tag]);
+    expect(sync.body[0].released).toContainEqual({ tag: cold.tag, reason: "cold" });
+    expect((ctx.mock.calls.presets.at(-1)!.config as any).provider.only).toEqual([keep.tag, warm.tag]);
+    const held = (await ctx.call("/api/presets?fresh=true")).body.find((x: any) => x.model === DEEPSEEK);
+    expect(held.status).toBe("up-to-date");
+    expect(held.ranked[1].held.since).toBe(NOW().toISOString());
+    const view = (await ctx.call("/api/overview")).body.models.find((m: any) => m.slug === DEEPSEEK);
+    expect(view.endpoints.find((e: any) => e.tag === warm.tag).held).not.toBeNull();
+    rows = [];
+    const again = await ctx.call("/api/presets/sync", { method: "POST", body: { models: [DEEPSEEK] } });
+    expect(again.body[0].released).toEqual([{ tag: warm.tag, reason: "cold" }]);
+    expect((ctx.mock.calls.presets.at(-1)!.config as any).provider.only).toEqual([keep.tag]);
+    expect(ctx.store.holds().get(DEEPSEEK)).toBeUndefined();
+  });
+
   test("a remote preset that still pins an order is out of date", async () => {
     await ctx.call("/api/refresh", { method: "POST", body: {} });
     await ctx.call("/api/presets/sync", { method: "POST", body: { models: [DEEPSEEK] } });

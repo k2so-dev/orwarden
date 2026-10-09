@@ -18,6 +18,7 @@ const blocked = computed(() => props.preset.status === "empty");
 const jsonOpen = ref(false);
 const json = computed(() => JSON.stringify(props.preset.config, null, 2));
 const min = computed(() => props.preset.policy.minQuantization);
+const held = computed(() => props.preset.ranked.filter((e) => e.held).length);
 const line = computed(() => {
   const p = props.preset;
   const parts = [
@@ -25,6 +26,7 @@ const line = computed(() => {
     p.picked ? "ticked endpoints" : p.rankBy === "cost" ? "cheapest effective" : "top by score",
     ...(p.picked ? [] : [`within +${Math.round(premium.value * 100)}% of cheapest`]),
     "no fixed order (cache-friendly)",
+    ...(held.value > 0 ? [`${held.value} held while the cache is warm`] : []),
     ...(p.policy.fallbacks ? ["fallbacks within list"] : []),
     ...(min.value && p.policy.quantizations.length > 0 ? [`${min.value}+ only`] : []),
     ...(p.policy.zdr ? ["ZDR"] : []),

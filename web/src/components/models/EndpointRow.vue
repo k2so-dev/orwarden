@@ -126,6 +126,7 @@ const onPick = () => {
 
 const DAY = 86_400_000;
 const BADGE_CHANGE = 0.1;
+const WARM_MINUTES = 15;
 const stab = computed(() => props.row.stability);
 const takenAt = computed(() => Date.parse(overview.value?.takenAt ?? new Date().toISOString()));
 
@@ -138,6 +139,15 @@ const badges = computed(() => {
     out.push({ text: `${up ? "↑" : "↓"}${pct(Math.abs(s.lastChangePct))} ${ago(s.lastChangeAt, takenAt.value).replace(" ago", "")}`, kind: up ? "bad" : "ok", tip: `Blended price ${up ? "rose" : "fell"} ${pct(Math.abs(s.lastChangePct))} ${ago(s.lastChangeAt, takenAt.value)} at this workload.` });
   }
   if (s.verdictFlaps >= 3) out.push({ text: "flapping", kind: "warn", tip: `Verdict changed ${s.verdictFlaps} times in 30 days.` });
+  const held = props.row.held;
+  const p = settings.value?.presets;
+  if (held && p) {
+    out.push({
+      text: "held",
+      kind: "warn",
+      tip: `Dropped from the preset ${ago(held.since, Date.now())}, kept while its conversations still use the cache. Extra spend so far ${money(held.overpayUsd)}. Goes after ${WARM_MINUTES} minutes without requests, ${p.holdHours} h or ${money(p.holdMaxUsd)} extra.`,
+    });
+  }
   return out;
 });
 

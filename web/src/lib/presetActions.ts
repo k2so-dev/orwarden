@@ -40,7 +40,7 @@ export async function patchPreset(model: string, body: { autoSync?: boolean; pic
 }
 
 export function togglePick(preset: PresetView, tag: string, reason: string | null): void {
-  const current = preset.ranked.map((e) => e.tag);
+  const current = preset.ranked.filter((e) => !e.held).map((e) => e.tag);
   const on = current.includes(tag);
   if (!on && reason) {
     notify("Not eligible for a preset", reason, "info");
@@ -118,7 +118,7 @@ export async function syncOne(preset: PresetView, showJson: () => void): Promise
   if (!r) return;
   if (r.status === "failed") notify("Write failed", r.error ?? r.slug, "err");
   else if (r.status === "skipped") notify("Nothing to sync", r.error ?? `@preset/${r.slug}`, "info");
-  else notify(created ? "Preset created" : "Preset updated", `@preset/${r.slug}`);
+  else notify(created ? "Preset created" : "Preset updated", `@preset/${r.slug}${r.held?.length ? ` · kept ${r.held.length} dropped provider${r.held.length === 1 ? "" : "s"} while the cache is warm` : ""}`);
   await reloadAfterWrite();
 }
 

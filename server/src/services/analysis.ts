@@ -9,7 +9,7 @@ import { endpointStability, NEUTRAL_STABILITY, type HistoryInputs, type Stabilit
 import type { Guardrail } from "../core/openrouter.ts";
 import { admissibleCount, optimize, totalCount, violations, type Violation } from "../core/optimizer.ts";
 import type { ClassifiedEndpoint, ClassifiedModel, Issue, ModelInput } from "../core/types.ts";
-import { HISTORY_DAYS, type Policy, type PresetSettings, type PriceEvent, type RunRecord } from "../db.ts";
+import { HISTORY_DAYS, type Hold, type Policy, type PresetSettings, type PriceEvent, type RunRecord } from "../db.ts";
 import { PRESET_SLUG_RE, type Settings } from "../settings.ts";
 
 export type AppSnapshot = {
@@ -87,6 +87,7 @@ export type EndpointView = {
   issues: Issue[];
   eligible: boolean;
   presetRank: number | null;
+  held: { since: string; overpayUsd: number } | null;
   ban: BanStatus;
 };
 
@@ -416,6 +417,11 @@ export function configHash(config: Record<string, unknown>): string {
 
 const WRITTEN_PROVIDER_KEYS = new Set(["order", "only", "allow_fallbacks", "quantizations", "require_parameters"]);
 
+export function remoteOnly(config: Record<string, unknown> | undefined): string[] | null {
+  const only = (config?.provider as { only?: unknown } | undefined)?.only;
+  return Array.isArray(only) && only.every((t) => typeof t === "string") ? only : null;
+}
+
 export function remoteEdits(version: { config?: Record<string, unknown>; system_prompt?: string | null } | null | undefined): string[] {
   const config = version?.config;
   if (!config) return ["unreadable config"];
@@ -438,6 +444,7 @@ type Ctx = {
   bans: BanInputs;
   presets: ReadonlyMap<string, PresetSettings>;
   history?: HistoryInputs;
+  holds?: ReadonlyMap<string, readonly Hold[]>;
 };
 
 type ModelCalc = {
@@ -446,7 +453,9 @@ type ModelCalc = {
   scores: Map<ClassifiedEndpoint, Scores>;
   stability: Map<ClassifiedEndpoint, Stability>;
   pool: ClassifiedEndpoint[];
+  base: ClassifiedEndpoint[];
   ranked: ClassifiedEndpoint[];
+  held: Map<ClassifiedEndpoint, Hold>;
   shares: Map<ClassifiedEndpoint, number>;
 };
 
@@ -490,8 +499,16 @@ function calcModel(input: ModelInput, ctx: Ctx, basis: Basis, current: Set<strin
   const found = endpointStability(ctx.history, model.slug, model.endpoints, ctx.snapshot.takenAt, profile, basis.settings.filters.minUptime);
   const stability = new Map(model.endpoints.map((e, i) => [e, found[i]!]));
   const scores = scoreEndpoints(model.endpoints, profile, pool, basis.weights, stability);
-  const ranked = rankForPreset(model, profile, desired, scores, ctx.presets.get(model.slug), ctx.settings.presets.topN, basis.zdrOnly, ctx.settings.presets.rankBy, ctx.settings.presets.maxPremium);
-  return { model, profile, scores, stability, pool, ranked, shares: routingShares(model, current, profile, ctx.settings) };
+  const preset = ctx.presets.get(model.slug);
+  const base = rankForPreset(model, profile, desired, scores, preset, ctx.settings.presets.topN, basis.zdrOnly, ctx.settings.presets.rankBy, ctx.settings.presets.maxPremium);
+  const excluded = new Set(preset?.excluded ?? []);
+  const held = new Map<ClassifiedEndpoint, Hold>();
+  for (const h of ctx.holds?.get(model.slug) ?? []) {
+    const e = pool.find((x) => x.tag === h.tag && !excluded.has(x.tag));
+    if (e && !held.has(e) && !base.some((b) => b.tag === h.tag)) held.set(e, h);
+  }
+  const ranked = [...base, ...held.keys()];
+  return { model, profile, scores, stability, pool, base, ranked, held, shares: routingShares(model, current, profile, ctx.settings) };
 }
 
 function costs(model: ClassifiedModel, ranked: ClassifiedEndpoint[] | null, current: Set<string>, desired: Set<string>, p: Pick<Profile, "h" | "r" | "tools" | "inputPerDay">, days: number, settings: Settings): CostTriple {
@@ -660,6 +677,7 @@ export function buildOverview(ctx: Ctx): Overview {
           issues: e.issues,
           eligible: isEligible(e, profile, desired, view.zdrOnly),
           presetRank: presetRank.get(i) ?? null,
+          held: heldView(basisCalc.held.get(basisCalc.model.endpoints[i]!)),
           ban: banStatus(e.provider, ctx.bans, current, desired, settings),
         };
       })
@@ -830,7 +848,7 @@ export function buildProviders(ctx: Ctx): ProvidersView {
   };
 }
 
-export type RemotePreset = { hash: string | null; model: string | null; edits: string[]; version: number | null; updatedAt: string | null } | null;
+export type RemotePreset = { hash: string | null; model: string | null; only: string[] | null; edits: string[]; version: number | null; updatedAt: string | null } | null;
 
 export type PresetEndpoint = {
   rank: number;
@@ -851,6 +869,7 @@ export type PresetEndpoint = {
   overall: number;
   pinned: boolean;
   picked: boolean;
+  held: { since: string; overpayUsd: number } | null;
 };
 
 export type PresetScenario = { name: string; h: number; r: number; tools: boolean; inputPerDay: number; default: number | null; preset: number | null };
@@ -883,6 +902,22 @@ export type PresetView = {
   syncedAt: string | null;
   blocker: Warning | null;
 };
+
+const heldView = (h: Hold | undefined) => (h ? { since: h.since, overpayUsd: h.overpayUsd } : null);
+
+export type PresetPool = { base: ClassifiedEndpoint[]; pool: ClassifiedEndpoint[]; profile: Profile };
+
+export function presetPools(ctx: Ctx, models: readonly string[]): Map<string, PresetPool> {
+  const current = currentBans(ctx.snapshot);
+  const desired = desiredBans(ctx.bans);
+  const out = new Map<string, PresetPool>();
+  for (const input of ctx.snapshot.models.filter((m) => hasPreset(m) && models.includes(m.slug))) {
+    const calc = calcModel(input, { ...ctx, holds: undefined }, presetBasis(ctx, input.slug), current, desired);
+    const excluded = new Set(ctx.presets.get(input.slug)?.excluded ?? []);
+    out.set(input.slug, { base: calc.base, pool: calc.pool.filter((e) => !excluded.has(e.tag)), profile: calc.profile });
+  }
+  return out;
+}
 
 export function buildPresets(ctx: Ctx, remote: ReadonlyMap<string, RemotePreset>): PresetView[] {
   const { snapshot, settings, q } = ctx;
@@ -970,6 +1005,7 @@ export function buildPresets(ctx: Ctx, remote: ReadonlyMap<string, RemotePreset>
             overall: scores.get(e)!.overall,
             pinned: pinned.has(e.tag),
             picked: preset?.picked?.includes(e.tag) ?? false,
+            held: heldView(calc.held.get(e)),
           };
         }),
         cheapest: cheapestEp && cheapestCost !== null ? { tag: cheapestEp.tag, providerName: cheapestEp.providerName, costPerM: cheapestCost } : null,

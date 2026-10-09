@@ -39,6 +39,7 @@ export type PriceKind = "baseline" | "added" | "changed" | "removed";
 export type PricedEndpoint = { tag: string; pIn: number; pOut: number; pCache: number; quantization: string };
 
 export type PriceEvent = PricedEndpoint & { ts: string; model: string; slot: number; kind: PriceKind };
+export type Hold = { model: string; tag: string; since: string; checkedAt: string; overpayUsd: number };
 
 export type EndpointState = PricedEndpoint & { model: string; slot: number; firstSeen: string; lastSeen: string };
 
@@ -91,6 +92,10 @@ create table if not exists runs (
 );
 create table if not exists decisions (
   run_id integer not null references runs(id), provider text not null, action text not null, reason text not null, delta real
+);
+create table if not exists preset_holds (
+  model text not null, tag text not null, since text not null, checked_at text not null, overpay_usd real not null default 0,
+  primary key (model, tag)
 );
 create table if not exists presets (
   model text primary key,
@@ -406,6 +411,23 @@ export class Store {
     return this.db
       .query<Decision, [number]>("select provider, action, reason, delta from decisions where run_id = ? order by rowid")
       .all(runId);
+  }
+
+  holds(): Map<string, Hold[]> {
+    const rows = this.db
+      .query<Hold, []>("select model, tag, since, checked_at as checkedAt, overpay_usd as overpayUsd from preset_holds order by model, since, tag")
+      .all();
+    const out = new Map<string, Hold[]>();
+    for (const r of rows) out.set(r.model, [...(out.get(r.model) ?? []), r]);
+    return out;
+  }
+
+  replaceHolds(model: string, holds: readonly Hold[]): void {
+    this.db.transaction(() => {
+      this.db.query("delete from preset_holds where model = ?").run(model);
+      const insert = this.db.query("insert into preset_holds (model, tag, since, checked_at, overpay_usd) values (?, ?, ?, ?, ?)");
+      for (const h of holds) insert.run(model, h.tag, h.since, h.checkedAt, h.overpayUsd);
+    })();
   }
 
   presetSettings(): Map<string, PresetSettings> {

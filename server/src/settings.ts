@@ -60,6 +60,8 @@ export const SettingsSchema = z.object({
     defaultScenario: z.string(),
     rankBy: z.enum(["score", "cost"]),
     maxPremium: z.number().min(0).max(5),
+    holdHours: z.number().min(0).max(168),
+    holdMaxUsd: z.number().min(0).max(1000),
   }),
   scenarios: z.object({
     days: z.number().int().min(1).max(365),
@@ -110,7 +112,7 @@ export const DEFAULT_SETTINGS: Settings = {
     hysteresis: { banAfterRuns: 2, unbanAfterRuns: 3 },
   },
   scoring: { price: 60, speed: 20, reliability: 20, stability: 10, unknownQuantPenalty: 15 },
-  presets: { topN: 5, slugPattern: "{model}-safe", defaultScenario: "actual", rankBy: "score", maxPremium: 0.15 },
+  presets: { topN: 5, slugPattern: "{model}-safe", defaultScenario: "actual", rankBy: "score", maxPremium: 0.15, holdHours: 24, holdMaxUsd: 1 },
   scenarios: {
     days: 7,
     inputTokensPerDay: 1_000_000,

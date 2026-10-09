@@ -304,6 +304,16 @@ const btn = "h-8 rounded-lg border border-border bg-background px-3 text-[13px] 
             <input :value="Number((s.presets.maxPremium * 100).toFixed(1))" type="number" min="0" max="500" step="5" :class="num" @input="setPremium(($event.target as HTMLInputElement).value)" />
             <span class="text-muted-foreground">%</span>
           </div>
+          <div>
+            <div class="font-medium">Keep dropped providers</div>
+            <div class="text-xs text-muted-foreground">while their conversations use the cache, up to this long and this much extra</div>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <input v-model.number="s.presets.holdHours" type="number" min="0" max="168" step="1" :class="num" />
+            <span class="text-muted-foreground">h</span>
+            <input v-model.number="s.presets.holdMaxUsd" type="number" min="0" max="1000" step="0.5" :class="num" />
+            <span class="text-muted-foreground">$</span>
+          </div>
           <span class="font-medium" title="Ids of presets synced from here never change; all others follow the new pattern">Naming pattern</span>
           <input v-model="s.presets.slugPattern" :class="[input, 'w-[180px] font-mono text-[12.5px]']" />
         </div>

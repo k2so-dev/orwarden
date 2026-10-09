@@ -67,6 +67,16 @@ export type CatalogModel = {
 
 export type PresetConfig = Record<string, unknown>;
 
+export type AnalyticsQuery = {
+  dimensions: string[];
+  granularity: "minute" | "hour" | "day";
+  metrics: string[];
+  timeRange: { start: string; end: string };
+  limit?: number;
+};
+
+export type AnalyticsRow = Record<string, string | number | null>;
+
 export type Preset = {
   id: string;
   slug: string;
@@ -87,6 +97,7 @@ export interface OpenRouterApi {
   listModels(): Promise<CatalogModel[]>;
   getPreset(slug: string): Promise<Preset | null>;
   upsertPreset(slug: string, config: PresetConfig): Promise<Preset>;
+  queryAnalytics(query: AnalyticsQuery): Promise<AnalyticsRow[]>;
 }
 
 export class HttpError extends Error {
@@ -166,5 +177,6 @@ export function createClient(opts: ClientOptions): OpenRouterApi {
           messages: [{ role: "user", content: "preset" }],
         })
       )!.data,
+    queryAnalytics: async (query) => (await request<{ data: { data: AnalyticsRow[] } }>("POST", "/analytics/query", query))!.data.data,
   };
 }

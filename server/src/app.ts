@@ -193,6 +193,7 @@ export function createApp(rt: Runtime) {
           bans: rt.banInputs(),
           presets: rt.store.presetSettings(),
           history: rt.historyInputs(),
+          holds: rt.store.holds(),
         }),
       ),
     )
@@ -216,6 +217,7 @@ export function createApp(rt: Runtime) {
           bans: rt.banInputs(),
           presets: rt.store.presetSettings(),
           history: rt.historyInputs(),
+          holds: rt.store.holds(),
         }),
       ),
     )
@@ -243,6 +245,7 @@ export function createApp(rt: Runtime) {
           bans: rt.banInputs(),
           presets: rt.store.presetSettings(),
           history: rt.historyInputs(),
+          holds: rt.store.holds(),
         };
         return c.json({
           ...result,
