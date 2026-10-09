@@ -2,13 +2,13 @@
 import { computed } from "vue";
 import type { EndpointView, ModelView, PresetView } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { ensureHistory, historyCache } from "@/stores/data";
+import { ensureTrend, trendCache } from "@/stores/data";
 import { columns, DEFAULT_SORT, density, openRows, sortBy, sortStates, toggleIn } from "@/stores/ui";
 import EndpointRow from "./EndpointRow.vue";
 
 const props = defineProps<{ model: ModelView; horizonLabel: string; preset?: PresetView }>();
 
-type SortKey = "rank" | "in" | "out" | "cache" | "disc" | "om" | "up" | "tps" | "lat" | "share" | "perM" | "hz" | "vs" | "overall" | "verdict" | "ban";
+type SortKey = "rank" | "in" | "out" | "cache" | "disc" | "om" | "up" | "tps" | "lat" | "share" | "perM" | "hz" | "vs" | "trend" | "stab" | "overall" | "verdict" | "ban";
 
 const SEVERITY: Record<string, number> = { ok: 0, outlier: 1, "hard-bad": 2 };
 
@@ -26,6 +26,8 @@ const VALUE: Record<SortKey, (e: EndpointView, i: number) => number> = {
   perM: (e) => e.costPerM,
   hz: (e) => e.costHorizon,
   vs: (e) => e.vsBest ?? 0,
+  trend: (e) => e.stability.priceTrend30d ?? 0,
+  stab: (e) => e.stability.score,
   overall: (e) => e.scores.overall,
   verdict: (e) => SEVERITY[e.verdict] ?? 0,
   ban: (e) => (e.ban.inGuardrail ? 2 : 0) + (e.ban.inDesired ? 1 : 0),
@@ -58,19 +60,20 @@ const template = computed(() => {
   if (c.lat) parts.push("64px");
   if (c.share) parts.push("64px");
   parts.push("78px", "88px", "70px");
+  if (c.stab) parts.push("84px", "66px");
   if (c.brk) parts.push("156px");
   parts.push("78px", "150px", "minmax(136px,1fr)");
   return parts.join(" ");
 });
 
 const height = computed(() => (density.value === "compact" ? "38px" : "50px"));
-const history = computed(() => historyCache.value.get(props.model.slug) ?? []);
+const trend = computed(() => trendCache.value.get(props.model.slug) ?? null);
 
 const rowKey = (id: string) => `${props.model.slug}|${id}`;
 
 function toggle(id: string): void {
   toggleIn(openRows, rowKey(id));
-  void ensureHistory(props.model.slug);
+  void ensureTrend(props.model.slug);
 }
 
 const HEADERS = computed(() => {
@@ -93,6 +96,12 @@ const HEADERS = computed(() => {
     { key: "hz", label: `$ / ${props.horizonLabel}`, align: "text-right" },
     { key: "vs", label: "vs best", align: "text-right", title: "Blended cost compared with the cheapest endpoint that passes the current filters" },
   );
+  if (c.stab) {
+    h.push(
+      { key: "trend", label: "Δ 30d", align: "text-right", title: "Blended price now vs 30 days ago, and the number of price changes in that time" },
+      { key: "stab", label: "Stability", align: "text-left", title: "Price changes, uptime dips and verdict flips over 30 days; new endpoints stay near 50" },
+    );
+  }
   return h;
 });
 
@@ -129,7 +138,7 @@ const indicator = (key: string | null) => (key && sortState.value.key === key ? 
       :template="template"
       :height="height"
       :open="openRows.has(rowKey(r.id))"
-      :history="history"
+      :trend="trend"
       :preset="preset"
       @toggle="toggle(r.id)"
     />

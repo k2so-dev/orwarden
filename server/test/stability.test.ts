@@ -30,6 +30,13 @@ describe("stability", () => {
     expect(s.score).toBeLessThan(60);
   });
 
+  test("trends fall back to the earliest known price when history is shorter than the window", () => {
+    const events = [event(25, "baseline", 1), event(38, "changed", 1.2)];
+    const s = computeStability({ ...base, current: prices(1.2), state: state(25), events });
+    expect(s.priceTrend30d).toBeCloseTo(0.2, 9);
+    expect(s.priceTrend7d).toBeCloseTo(0.2, 9);
+  });
+
   test("blended price follows the workload", () => {
     const events = [event(0, "baseline", 1), { ...event(38, "changed", 1), pOut: 4 }];
     const input = { ...base, current: { pIn: 1, pOut: 4, pCache: 0.1 }, state: state(0), events };

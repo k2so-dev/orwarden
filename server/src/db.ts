@@ -42,6 +42,8 @@ export type PriceEvent = PricedEndpoint & { ts: string; model: string; slot: num
 
 export type EndpointState = PricedEndpoint & { model: string; slot: number; firstSeen: string; lastSeen: string };
 
+export type DailyPoint = { tag: string; day: string; uptimeMin: number; uptimeAvg: number; tps: number | null };
+
 export type HistoryPoint = {
   ts: string;
   tag: string;
@@ -280,6 +282,15 @@ export class Store {
         "select model, tag, ts, uptime, verdict from endpoint_history where ts >= ? order by ts",
       )
       .all(since);
+  }
+
+  dailyHistory(model: string, since: string): DailyPoint[] {
+    return this.db
+      .query<DailyPoint, [string, string]>(
+        `select tag, substr(ts, 1, 10) as day, min(uptime) as uptimeMin, avg(uptime) as uptimeAvg, avg(tps) as tps
+         from endpoint_history where model = ? and ts >= ? group by tag, day order by day, tag`,
+      )
+      .all(model, since);
   }
 
   endpointStates(model?: string): EndpointState[] {

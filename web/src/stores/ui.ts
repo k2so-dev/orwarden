@@ -6,7 +6,7 @@ setInterval(() => (clock.value = new Date()), 30_000);
 
 export const theme = useStorage<"light" | "dark">("rr-theme", "light");
 export const density = useStorage<"compact" | "comfortable">("rr-density", "compact");
-export const columns = useStorage("rr-columns", { zt: true, lat: true, share: true, brk: true });
+export const columns = useStorage("rr-columns", { zt: true, lat: true, share: true, brk: true, stab: true }, localStorage, { mergeDefaults: true });
 export const settingsOpen = ref(false);
 export type SortState = { key: string; dir: "asc" | "desc" };
 
@@ -34,7 +34,7 @@ export function toggleIn(source: typeof openRows, key: string): void {
   source.value = next;
 }
 
-const ASC_FIRST = new Set(["rank", "in", "out", "cache", "om", "lat", "perM", "hz", "vs"]);
+const ASC_FIRST = new Set(["rank", "in", "out", "cache", "om", "lat", "perM", "hz", "vs", "trend"]);
 
 export function sortBy(model: string, key: string): void {
   const s = sortStates.value.get(model) ?? DEFAULT_SORT;

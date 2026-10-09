@@ -5,12 +5,12 @@ import {
   RequestError,
   unwrap,
   type BanHistory,
-  type HistoryPoint,
   type Overview,
   type PresetView,
   type ProvidersView,
   type Settings,
   type Status,
+  type TrendData,
 } from "@/lib/api";
 import { viewQuery } from "./filters";
 import { notify } from "./toast";
@@ -96,6 +96,7 @@ export async function loadViews(): Promise<void> {
     guard(() => unwrap(client.bans.history.$get({ query: { limit: "30" } }))),
   ]);
   if (seq !== viewsSeq) return;
+  if (o && o.takenAt !== overview.value?.takenAt) trendCache.value = new Map();
   if (o) overview.value = o;
   if (p) providers.value = p;
   if (pr) presets.value = pr;
@@ -158,13 +159,13 @@ export function previewOnly(): void {
   notify("Preview only", "Dry-run: nothing was written to OpenRouter.", "info");
 }
 
-export const historyCache = shallowRef<ReadonlyMap<string, HistoryPoint[]>>(new Map());
-const historyPending = new Set<string>();
+export const trendCache = shallowRef<ReadonlyMap<string, TrendData>>(new Map());
+const trendPending = new Set<string>();
 
-export async function ensureHistory(model: string): Promise<void> {
-  if (historyCache.value.has(model) || historyPending.has(model)) return;
-  historyPending.add(model);
-  const points = await guard(() => unwrap(client.history.$get({ query: { model, days: "7" } })));
-  historyPending.delete(model);
-  if (points) historyCache.value = new Map(historyCache.value).set(model, points);
+export async function ensureTrend(model: string): Promise<void> {
+  if (trendCache.value.has(model) || trendPending.has(model)) return;
+  trendPending.add(model);
+  const data = await guard(() => unwrap(client.trend.$get({ query: { model } })));
+  trendPending.delete(model);
+  if (data) trendCache.value = new Map(trendCache.value).set(model, data);
 }

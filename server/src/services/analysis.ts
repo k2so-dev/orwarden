@@ -57,6 +57,7 @@ export type BanStatus = {
 
 export type EndpointView = {
   tag: string;
+  slot: number;
   provider: string;
   providerName: string;
   quantization: string;
@@ -578,6 +579,7 @@ export function buildOverview(ctx: Ctx): Overview {
         const costPerM = unitCost(e, profile.h, profile.r);
         return {
           tag: e.tag,
+          slot: model.endpoints.slice(0, i).filter((x) => x.tag === e.tag).length,
           provider: e.provider,
           providerName: e.providerName,
           quantization: e.quantization,

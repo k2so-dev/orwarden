@@ -74,7 +74,7 @@ export function computeStability(input: StabilityInput): Stability {
   };
   const nowCost = cost(input.current);
   const trend = (t: number) => {
-    const then = priceAt(t);
+    const then = priceAt(t) ?? (priced[0] ? cost(priced[0]) : null);
     return then !== null && then > 0 ? nowCost / then - 1 : null;
   };
 

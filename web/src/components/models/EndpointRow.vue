@@ -2,8 +2,8 @@
 import { computed } from "vue";
 import Sparkline from "@/components/app/Sparkline.vue";
 import StatusBadge, { type BadgeKind } from "@/components/app/StatusBadge.vue";
-import type { EndpointView, HistoryPoint, ModelView, PresetView } from "@/lib/api";
-import { money, pct, periodLabel, price, seconds, uptime, volume } from "@/lib/format";
+import type { EndpointView, ModelView, PresetView, TrendData } from "@/lib/api";
+import { ago, money, pct, periodLabel, price, seconds, signedPct, uptime, volume } from "@/lib/format";
 import { togglePick } from "@/lib/presetActions";
 import { TONE_CLASS, verdictBadge, type TipLine } from "@/lib/issues";
 import { cn } from "@/lib/utils";
@@ -15,11 +15,11 @@ const props = defineProps<{
   row: EndpointView;
   position: number;
   model: ModelView;
-  cols: { zt: boolean; lat: boolean; share: boolean; brk: boolean };
+  cols: { zt: boolean; lat: boolean; share: boolean; brk: boolean; stab: boolean };
   template: string;
   height: string;
   open: boolean;
-  history: HistoryPoint[];
+  trend: TrendData | null;
   preset?: PresetView;
 }>();
 defineEmits<{ toggle: [] }>();
@@ -69,12 +69,12 @@ function tipBan(e: Event) {
 function tipScore(e: Event) {
   const s = props.row.scores;
   const w = view.value.weights;
-  const total = w.price + w.speed + w.reliability || 1;
-  const weighted = (s.price * w.price + s.speed * w.speed + s.reliability * w.reliability) / total;
+  const total = w.price + w.speed + w.reliability + w.stability || 1;
+  const weighted = (s.price * w.price + s.speed * w.speed + s.reliability * w.reliability + s.stability * w.stability) / total;
   const penalty = props.row.quant === "unknown" ? Math.max(0, Math.round(weighted - s.overall)) : 0;
   const lines: TipLine[] = [
     {
-      text: `(Price ${Math.round(s.price)} × ${w.price} + Speed ${Math.round(s.speed)} × ${w.speed} + Reliability ${Math.round(s.reliability)} × ${w.reliability}) / ${total} = ${weighted.toFixed(1)}`,
+      text: `(Price ${Math.round(s.price)} × ${w.price} + Speed ${Math.round(s.speed)} × ${w.speed} + Reliability ${Math.round(s.reliability)} × ${w.reliability} + Stability ${Math.round(s.stability)} × ${w.stability}) / ${total} = ${weighted.toFixed(1)}`,
       tone: "fg",
     },
   ];
@@ -124,10 +124,70 @@ const onPick = () => {
   if (props.preset) togglePick(props.preset, props.row.tag, pickReason.value);
 };
 
-const series = computed(() => props.history.filter((p) => p.tag === props.row.tag));
-const outSeries = computed(() => series.value.map((p) => p.pOut));
-const upSeries = computed(() => series.value.map((p) => p.uptime));
-const outRange = computed(() => (outSeries.value.length ? `$${price(Math.min(...outSeries.value))}–$${price(Math.max(...outSeries.value))}` : "—"));
+const DAY = 86_400_000;
+const BADGE_CHANGE = 0.1;
+const stab = computed(() => props.row.stability);
+const takenAt = computed(() => Date.parse(overview.value?.takenAt ?? new Date().toISOString()));
+
+const badges = computed(() => {
+  const s = stab.value;
+  const out: { text: string; kind: BadgeKind; tip: string }[] = [];
+  if (s.isNew) out.push({ text: "new", kind: "mute", tip: `First seen ${ago(new Date(takenAt.value - (s.ageDays ?? 0) * DAY).toISOString(), takenAt.value)}. Stability stays near 50 until there are 7 days of history.` });
+  if (s.lastChangeAt && s.lastChangePct !== null && Math.abs(s.lastChangePct) >= BADGE_CHANGE && takenAt.value - Date.parse(s.lastChangeAt) < 7 * DAY) {
+    const up = s.lastChangePct > 0;
+    out.push({ text: `${up ? "↑" : "↓"}${pct(Math.abs(s.lastChangePct))} ${ago(s.lastChangeAt, takenAt.value).replace(" ago", "")}`, kind: up ? "bad" : "ok", tip: `Blended price ${up ? "rose" : "fell"} ${pct(Math.abs(s.lastChangePct))} ${ago(s.lastChangeAt, takenAt.value)} at this workload.` });
+  }
+  if (s.verdictFlaps >= 3) out.push({ text: "flapping", kind: "warn", tip: `Verdict changed ${s.verdictFlaps} times in 30 days.` });
+  return out;
+});
+
+const trendTone = computed(() => {
+  const t = stab.value.priceTrend30d;
+  if (t === null || Math.abs(t) < 0.005) return "text-muted-foreground";
+  return t > 0 ? "text-bad" : "text-ok";
+});
+const trendText = computed(() => {
+  const t = stab.value.priceTrend30d;
+  if (t === null) return "—";
+  return Math.abs(t) < 0.005 ? "0%" : signedPct(t);
+});
+
+function tipBadge(e: Event, tip: string) {
+  showTip(e, "History", [{ text: tip, tone: "fg" }]);
+}
+function tipStability(e: Event) {
+  const s = stab.value;
+  const lines: TipLine[] = [
+    { text: `Price: ${s.priceChanges} change${s.priceChanges === 1 ? "" : "s"} in 30 days, highest/lowest ${s.priceSwing.toFixed(2)}×`, tone: "fg" },
+    { text: `7 days: ${signedPct(s.priceTrend7d)} · 30 days: ${signedPct(s.priceTrend30d)}`, tone: "fg" },
+    { text: `Uptime: ${s.uptimeDips} day${s.uptimeDips === 1 ? "" : "s"} below the minimum, worst ${s.uptimeMin7d === null ? "—" : uptime(s.uptimeMin7d)} in 7 days`, tone: "fg" },
+    { text: `Verdict flips: ${s.verdictFlaps}`, tone: "fg" },
+  ];
+  if (s.ageDays === null) lines.push({ text: "No history yet, scored as neutral 50.", tone: "muted" });
+  else if (s.isNew) lines.push({ text: `Only ${s.ageDays.toFixed(1)} days of history, pulled towards 50.`, tone: "muted" });
+  showTip(e, "Stability", lines);
+}
+
+const priceSteps = computed(() =>
+  (props.trend?.events ?? []).filter((x) => x.tag === props.row.tag && x.slot === props.row.slot && x.kind !== "removed"),
+);
+const dailyPrices = computed(() => {
+  const n = props.trend?.days ?? 30;
+  const end = Math.floor(takenAt.value / DAY) * DAY + DAY;
+  const out: { pIn: number; pOut: number }[] = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const cut = end - i * DAY;
+    const last = priceSteps.value.filter((x) => Date.parse(x.ts) < cut).at(-1);
+    if (last) out.push({ pIn: last.pIn, pOut: last.pOut });
+  }
+  return out;
+});
+const outSeries = computed(() => dailyPrices.value.map((p) => p.pOut));
+const inSeries = computed(() => dailyPrices.value.map((p) => p.pIn));
+const upSeries = computed(() => (props.trend?.daily ?? []).filter((d) => d.tag === props.row.tag).map((d) => d.uptimeMin));
+const range = (v: number[]) => (v.length ? `$${price(Math.min(...v))}–$${price(Math.max(...v))}` : "—");
+const outRange = computed(() => range(outSeries.value));
+const inRange = computed(() => range(inSeries.value));
 const upMin = computed(() => (upSeries.value.length ? uptime(Math.min(...upSeries.value)) : "—"));
 const detailReasons = computed<TipLine[]>(() => (reasons.value.length ? reasons.value : [{ text: "No issues found.", tone: "muted" }]));
 
@@ -158,7 +218,12 @@ const cell = "px-2.5 text-right";
       </button>
       <span :class="cn('tnum w-[22px] text-right font-semibold', row.presetRank === null && 'text-muted-foreground')">{{ position }}</span>
       <div :class="cn('flex min-w-0 flex-col pl-1 leading-tight', dim && 'opacity-45')">
-        <span class="font-medium">{{ row.providerName }}</span>
+        <span class="flex items-center gap-1">
+          <span class="font-medium">{{ row.providerName }}</span>
+          <span v-for="b in badges" :key="b.text" class="inline-flex cursor-help" @mouseenter="tipBadge($event, b.tip)" @mouseleave="hideTip">
+            <StatusBadge :kind="b.kind" class="h-4 px-1 text-[10px]">{{ b.text }}</StatusBadge>
+          </span>
+        </span>
         <span class="font-mono text-[11px] text-muted-foreground">{{ row.tag }}</span>
       </div>
     </div>
@@ -183,6 +248,15 @@ const cell = "px-2.5 text-right";
     <div :class="cn(cell, 'tnum font-medium', dim && 'opacity-45')">{{ money(row.costPerM) }}</div>
     <div :class="cn(cell, 'tnum', dim && 'opacity-45')">{{ money(row.costHorizon) }}</div>
     <div :class="cn(cell, 'tnum', vsTone, dim && 'opacity-45')">{{ vsText }}</div>
+    <template v-if="cols.stab">
+      <div :class="cn(cell, 'tnum', dim && 'opacity-45')">
+        <span :class="trendTone">{{ trendText }}</span><span v-if="stab.priceChanges > 0" class="text-muted-foreground"> · {{ stab.priceChanges }}</span>
+      </div>
+      <div class="cursor-help px-2.5" :class="dim && 'opacity-45'" @mouseenter="tipStability" @mouseleave="hideTip">
+        <div :class="cn('tnum text-[12.5px]', stab.ageDays === null && 'text-muted-foreground')">{{ Math.round(row.scores.stability) }}</div>
+        <div class="h-[3px] rounded-[2px] bg-muted"><div class="h-[3px] rounded-[2px] bg-muted-foreground" :style="{ width: `${row.scores.stability}%` }"></div></div>
+      </div>
+    </template>
     <div v-if="cols.brk" class="grid grid-cols-3 gap-2 px-2.5 text-[11.5px]" :class="dim && 'opacity-45'">
       <div>
         <div class="tnum text-right">{{ Math.round(row.scores.price) }}</div>
@@ -229,11 +303,15 @@ const cell = "px-2.5 text-right";
       </div>
       <div class="flex flex-col gap-2.5">
         <div>
-          <div class="flex justify-between text-xs"><b class="font-semibold">Output price · 7d</b><span class="tnum text-muted-foreground">{{ outRange }}</span></div>
+          <div class="flex justify-between text-xs"><b class="font-semibold">Output price · 30d</b><span class="tnum text-muted-foreground">{{ outRange }}</span></div>
           <Sparkline :values="outSeries" :width="160" :height="34" class="text-foreground" />
         </div>
         <div>
-          <div class="flex justify-between text-xs"><b class="font-semibold">Uptime · 7d</b><span class="tnum text-muted-foreground">min {{ upMin }}</span></div>
+          <div class="flex justify-between text-xs"><b class="font-semibold">Input price · 30d</b><span class="tnum text-muted-foreground">{{ inRange }}</span></div>
+          <Sparkline :values="inSeries" :width="160" :height="34" class="text-foreground" />
+        </div>
+        <div>
+          <div class="flex justify-between text-xs"><b class="font-semibold">Daily worst uptime · 30d</b><span class="tnum text-muted-foreground">min {{ upMin }}</span></div>
           <Sparkline :values="upSeries" :width="160" :height="34" class="text-ok" />
         </div>
       </div>

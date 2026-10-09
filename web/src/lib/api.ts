@@ -38,5 +38,5 @@ export type CatalogItem = InferResponseType<typeof client.catalog.$get, 200>[num
 export type SyncResult = InferResponseType<(typeof client.presets.sync)["$post"], 200>[number];
 export type ApplyResult = InferResponseType<(typeof client.bans.apply)["$post"], 200>;
 export type HistoryItem = BanHistory[number];
-export type HistoryPoint = InferResponseType<typeof client.history.$get, 200>[number];
+export type TrendData = InferResponseType<typeof client.trend.$get, 200>;
 export type PresetSettingsPatch = InferRequestType<(typeof client.presets.settings)["$put"]>["json"];

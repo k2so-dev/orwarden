@@ -10,6 +10,7 @@ import { applyBans, banHistory, discardDrafts, rollback } from "./services/bans.
 import { listPresets, pinLegacySlugs, syncPresets, updatePresetSettings } from "./services/presets.ts";
 import { refresh } from "./services/refresh.ts";
 import { AppError, type Runtime } from "./services/state.ts";
+import { HISTORY_DAYS } from "./db.ts";
 import { PRESET_SLUG_RE } from "./settings.ts";
 
 const bool = z.enum(["true", "false"]).transform((v) => v === "true");
@@ -199,6 +200,11 @@ export function createApp(rt: Runtime) {
       const { model, days } = c.req.valid("query");
       const since = new Date(rt.now().getTime() - days * 86_400_000).toISOString();
       return c.json(rt.store.history(model, since));
+    })
+    .get("/trend", zValidator("query", z.object({ model: z.string().min(3) })), (c) => {
+      const { model } = c.req.valid("query");
+      const since = new Date(rt.now().getTime() - HISTORY_DAYS * 86_400_000).toISOString();
+      return c.json({ days: HISTORY_DAYS, events: rt.store.priceEvents("", model), daily: rt.store.dailyHistory(model, since) });
     })
     .get("/providers", zValidator("query", ViewQuerySchema), (c) =>
       c.json(

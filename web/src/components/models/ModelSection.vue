@@ -48,6 +48,7 @@ const COLUMN_ITEMS = [
   { key: "lat", label: "Latency" },
   { key: "share", label: "Traffic share" },
   { key: "brk", label: "Score breakdown" },
+  { key: "stab", label: "Stability" },
 ] as const;
 
 const DENSITY = [
