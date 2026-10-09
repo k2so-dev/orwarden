@@ -34,6 +34,7 @@ const presetSub = computed(() => {
 });
 const defaultTip = computed(() => [
   { text: `What you pay now · ${scenarioName.value}.`, tone: "fg" as const },
+  ...(summary.value ? [{ text: `Range ${money(summary.value.defaultLow)}–${money(summary.value.defaultHigh)}: every model on its cheapest to its most expensive endpoint.`, tone: "fg" as const }] : []),
   { text: "OpenRouter splits traffic across endpoints by its own load balancing. Shares are estimated from each endpoint's price and uptime, the way OpenRouter weights them, not from your recorded traffic.", tone: "muted" as const },
 ]);
 
@@ -110,7 +111,10 @@ const shown = computed(() =>
 const cell = "flex cursor-help flex-col justify-center gap-px border-l border-border px-4 py-2";
 const cellLabel = "whitespace-nowrap text-[11.5px] text-muted-foreground";
 const cellValue = "tnum text-[17px] font-semibold tracking-[-0.01em]";
-const banTip = computed(() => [{ text: `${banCount.value}. Bans apply to every model.`, tone: "fg" as const }]);
+const banTip = computed(() => [
+  { text: `${banCount.value}. Bans apply to every model.`, tone: "fg" as const },
+  ...(summary.value ? [{ text: `Range ${money(summary.value.bansLow)}–${money(summary.value.bansHigh)}: every model on its cheapest to its most expensive endpoint left after the bans.`, tone: "fg" as const }] : []),
+]);
 const topRisks = computed(() => {
   const all = models.value.flatMap((m) => (m.estimate?.risks ?? []).map((r) => ({ ...r, model: m.name })));
   return sortRisks(all.filter((r) => r.kind !== "routing" && r.kind !== "default-model")).slice(0, 6);
@@ -174,8 +178,8 @@ const riskTip = [{ text: "Share of traffic served at fp4 or undisclosed quantiza
       </Popover>
     </div>
     <div v-if="models.length > 0" class="flex flex-wrap">
-      <Tip :title="`Default routing`" :lines="defaultTip" :class="cell"><span :class="cellLabel">Default routing · {{ horizon }}</span><span :class="cellValue">{{ money(summary?.default) }}</span></Tip>
-      <Tip title="With global bans" :lines="banTip" :class="cell"><span :class="cellLabel">With global bans</span><span class="flex items-baseline gap-1.5"><span :class="cellValue">{{ money(summary?.bans) }}</span><DeltaChip :value="delta(summary?.bans, summary?.default)" /></span></Tip>
+      <Tip :title="`Default routing`" :lines="defaultTip" :class="cell"><span :class="cellLabel">Default routing · {{ horizon }}</span><span :class="cellValue">{{ money(summary?.default) }}</span><span v-if="summary" class="tnum text-[11px] text-muted-foreground">{{ money(summary.defaultLow) }}–{{ money(summary.defaultHigh) }}</span></Tip>
+      <Tip title="With global bans" :lines="banTip" :class="cell"><span :class="cellLabel">With global bans</span><span class="flex items-baseline gap-1.5"><span :class="cellValue">{{ money(summary?.bans) }}</span><DeltaChip :value="delta(summary?.bans, summary?.default)" /></span><span v-if="summary" class="tnum text-[11px] text-muted-foreground">{{ money(summary.bansLow) }}–{{ money(summary.bansHigh) }}</span></Tip>
       <Tip title="With presets" :lines="presetTip" :class="cell"><span :class="cellLabel">With presets</span><span class="flex items-baseline gap-1.5"><span :class="cellValue">{{ money(summary?.presets) }}</span><DeltaChip :value="delta(summary?.presets, summary?.default)" /></span><span v-if="summary" :class="['tnum text-[11px]', summary.confidence === 'high' ? 'text-muted-foreground' : summary.confidence === 'medium' ? 'text-warn' : 'text-bad']">{{ money(summary.presetsLow) }}–{{ money(summary.presetsHigh) }} · {{ summary.confidence }}</span></Tip>
       <Tip title="Quantization risk" :lines="riskTip" :class="cell"><span :class="cellLabel">fp4 / unknown quant</span><span class="flex items-baseline gap-1.5"><span :class="[cellValue, 'text-bad']">{{ pct(summary?.riskShare) }}</span><span class="text-xs text-muted-foreground">of traffic</span></span></Tip>
     </div>

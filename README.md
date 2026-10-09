@@ -160,6 +160,8 @@ This is the "With presets" figure; the real cost is at most this. It is compared
 - **Default routing:** what OpenRouter does without a preset. It spreads traffic across all non-ignored endpoints with weight `uptime / p²`, where `p` is `p_in` by default (`optimizer.routingPrice` in the settings API switches it to `p_in + p_out` or the blended `C`).
 - **With global bans:** the same spread after the ban list is applied.
 
+The three cards at the top of the Models tab show these figures for all tracked models. *Default routing* and *With global bans* show a range below the headline: every model on its cheapest to its most expensive endpoint that routing may use. *With presets* shows the risk-adjusted range described next, with its confidence.
+
 **Range and risks.** Every preset estimate also carries a low end, a high end, a confidence (high, medium, low) and the risks behind them. The low end is the cheapest listed provider. The high end adds the money each risk can cost:
 
 | Risk | Source | Added to the high end |

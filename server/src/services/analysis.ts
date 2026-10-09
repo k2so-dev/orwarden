@@ -115,7 +115,7 @@ export type Overview = {
   usageDays: number;
   scenario: { name: string; tokensPerDay: number; tools: boolean | null; h: number | null; r: number | null };
   scenarios: string[];
-  summary: { default: number; bans: number; presets: number; presetsLow: number; presetsHigh: number; confidence: Confidence; riskShare: number };
+  summary: { default: number; defaultLow: number; defaultHigh: number; bans: number; bansLow: number; bansHigh: number; presets: number; presetsLow: number; presetsHigh: number; confidence: Confidence; riskShare: number };
   models: ModelView[];
 };
 
@@ -498,6 +498,13 @@ function calcModel(input: ModelInput, ctx: Ctx, basis: Basis, current: Set<strin
   return { model, profile, scores, stability, pool, base, ranked, held, shares: routingShares(model, current, profile, ctx.settings) };
 }
 
+function spread(model: ClassifiedModel, banned: ReadonlySet<string>, p: Pick<Profile, "h" | "r" | "tools" | "inputPerDay">, days: number): { low: number; high: number } | null {
+  const perM = model.endpoints.filter((e) => !banned.has(e.provider) && (!p.tools || e.tools)).map((e) => unitCost(e, p.h, p.r));
+  if (perM.length === 0) return null;
+  const money = (v: number) => (v * p.inputPerDay * days) / 1_000_000;
+  return { low: money(Math.min(...perM)), high: money(Math.max(...perM)) };
+}
+
 function costs(model: ClassifiedModel, ranked: ClassifiedEndpoint[] | null, current: Set<string>, desired: Set<string>, p: Pick<Profile, "h" | "r" | "tools" | "inputPerDay">, days: number, settings: Settings): CostTriple {
   const toMoney = (perM: number | null) => (perM === null ? null : (perM * p.inputPerDay * days) / 1_000_000);
   const mode = settings.optimizer.routingPrice;
@@ -598,7 +605,7 @@ export function buildOverview(ctx: Ctx): Overview {
   const current = currentBans(snapshot);
   const desired = desiredBans(ctx.bans);
   const slugs = trackedSlugs(snapshot.models, ctx.settings, ctx.presets);
-  const summary = { default: 0, bans: 0, presets: 0, presetsLow: 0, presetsHigh: 0, confidence: "high" as Confidence, riskShare: 0 };
+  const summary = { default: 0, defaultLow: 0, defaultHigh: 0, bans: 0, bansLow: 0, bansHigh: 0, presets: 0, presetsLow: 0, presetsHigh: 0, confidence: "high" as Confidence, riskShare: 0 };
   const estimates: Estimate[] = [];
   let riskVolume = 0;
   let volume = 0;
@@ -617,6 +624,12 @@ export function buildOverview(ctx: Ctx): Overview {
     const cost = costs(model, presetRanked, current, desired, profile, days, settings);
     summary.default += cost.default ?? 0;
     summary.bans += cost.bans ?? cost.default ?? 0;
+    const defaultSpread = spread(model, current, profile, days);
+    const bansSpread = spread(model, desired, profile, days);
+    summary.defaultLow += defaultSpread?.low ?? cost.default ?? 0;
+    summary.defaultHigh += defaultSpread?.high ?? cost.default ?? 0;
+    summary.bansLow += bansSpread?.low ?? cost.bans ?? cost.default ?? 0;
+    summary.bansHigh += bansSpread?.high ?? cost.bans ?? cost.default ?? 0;
     summary.presets += cost.preset ?? cost.bans ?? cost.default ?? 0;
     const calibration = modelCalibration(input, basisCalc, presetRanked, current, mctx);
     const estimate = presetCalc ? modelEstimate(input, basisCalc, presetRanked, current, profile, days, calibration) : null;

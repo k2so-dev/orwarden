@@ -171,6 +171,16 @@ describe("api flow", () => {
     expect(catalog.body[0].usageUsd).toBeGreaterThan(0);
   });
 
+  test("default routing and bans carry a range around their headline", async () => {
+    await ctx.call("/api/refresh", { method: "POST", body: {} });
+    const { summary } = (await ctx.call("/api/overview")).body;
+    expect(summary.defaultLow).toBeGreaterThan(0);
+    expect(summary.defaultLow).toBeLessThanOrEqual(summary.default);
+    expect(summary.defaultHigh).toBeGreaterThanOrEqual(summary.default);
+    expect(summary.bansLow).toBeLessThanOrEqual(summary.bans);
+    expect(summary.bansHigh).toBeGreaterThanOrEqual(summary.bans);
+  });
+
   test("scheduled refresh never touches the guardrail, even in apply mode", async () => {
     await ctx.call("/api/settings", { method: "PUT", body: { mode: "apply" } });
     for (let i = 0; i < 4; i++) await ctx.rt.exclusive(() => import("../src/services/refresh.ts").then((m) => m.refresh(ctx.rt, true)));
