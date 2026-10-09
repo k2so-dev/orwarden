@@ -6,6 +6,9 @@ import { signedMoney, signedPct } from "@/lib/format";
 import { PRESET_SLUG_RE, patchPreset, renamePreset, resetPick, syncBusy, syncLabel, syncOne } from "@/lib/presetActions";
 import { cn } from "@/lib/utils";
 import { dryRun, settings, writeBlocked } from "@/stores/data";
+import Tip from "@/components/app/Tip.vue";
+import { money } from "@/lib/format";
+import { CONFIDENCE, riskLines } from "@/lib/estimate";
 
 const props = defineProps<{ preset: PresetView }>();
 
@@ -34,6 +37,8 @@ const saving = computed(() => {
   if (c.saving === null) return "";
   return `${signedMoney(c.saving)} / ${props.preset.horizonDays}d (${signedPct(c.savingPct)}) vs default`;
 });
+const estimate = computed(() => props.preset.estimate);
+const estimateTip = computed(() => (estimate.value ? riskLines(estimate.value.risks) : []));
 const savingTone = computed(() => ((props.preset.cost.saving ?? 0) <= 0 ? "text-ok" : "text-bad"));
 const primary = computed(() => !(props.preset.status === "up-to-date" && !dryRun.value && props.preset.syncedAt));
 
@@ -65,6 +70,9 @@ async function saveRename() {
         <div v-else class="text-xs text-muted-foreground">{{ line }}</div>
       </div>
       <span v-if="saving && !blocked" :class="['tnum text-[12.5px] font-semibold', savingTone]">{{ saving }}</span>
+      <Tip v-if="estimate && !blocked" :title="`Estimate · ${CONFIDENCE[estimate.confidence].text}`" :lines="estimateTip" class="tnum text-xs text-muted-foreground">
+        range {{ money(estimate.low) }}–{{ money(estimate.high) }} · {{ estimate.confidence }}
+      </Tip>
       <div class="ml-auto flex flex-wrap items-center gap-1.5">
         <button v-if="preset.picked" type="button" class="inline-flex h-[30px] items-center rounded-lg px-3 text-[12.5px] font-medium hover:bg-accent" @click="resetPick(preset.model)">Reset to top {{ topN }}</button>
         <div class="flex items-center gap-1.5 px-1.5" :title="dryRun ? 'Dry-run is on: scheduled refreshes only plan the write' : 'Scheduled refreshes rewrite this preset whenever its ranking changes'">

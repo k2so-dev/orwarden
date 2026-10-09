@@ -1,6 +1,6 @@
 import type { Config } from "../settings.ts";
 import type { ActivityRow, Guardrail, OpenRouterApi, RawEndpoint } from "./openrouter.ts";
-import type { Endpoint, ModelInput, Snapshot } from "./types.ts";
+import type { Endpoint, ModelInput, Snapshot, UsageDay } from "./types.ts";
 
 const PER_MILLION = 1_000_000;
 
@@ -55,15 +55,22 @@ export function stripVariant(slug: string): string {
 export function aggregateUsage(rows: ActivityRow[], windowDays: number, now: Date) {
   const today = Math.floor(now.getTime() / 86_400_000) * 86_400_000;
   const since = today - windowDays * 86_400_000;
-  const byModel = new Map<string, { usd: number; prompt: number; completion: number; cached: number }>();
+  const byModel = new Map<string, { usd: number; prompt: number; completion: number; cached: number; requests: number; daily: Map<string, UsageDay> }>();
   for (const row of rows) {
     const day = Date.parse(`${row.date.replace(" ", "T")}Z`);
     if (!Number.isFinite(day) || day < since || day >= today) continue;
-    const acc = byModel.get(row.model) ?? { usd: 0, prompt: 0, completion: 0, cached: 0 };
-    acc.usd += row.usage ?? 0;
-    acc.prompt += row.prompt_tokens ?? 0;
-    acc.completion += Math.max(row.completion_tokens ?? 0, row.reasoning_tokens ?? 0);
-    acc.cached += row.cached_tokens ?? 0;
+    const acc = byModel.get(row.model) ?? { usd: 0, prompt: 0, completion: 0, cached: 0, requests: 0, daily: new Map<string, UsageDay>() };
+    const key = new Date(day).toISOString().slice(0, 10);
+    const d = acc.daily.get(key) ?? { day: key, usd: 0, prompt: 0, completion: 0, cached: 0, requests: 0 };
+    const completion = Math.max(row.completion_tokens ?? 0, row.reasoning_tokens ?? 0);
+    for (const target of [acc, d]) {
+      target.usd += row.usage ?? 0;
+      target.prompt += row.prompt_tokens ?? 0;
+      target.completion += completion;
+      target.cached += row.cached_tokens ?? 0;
+      target.requests += row.requests ?? 0;
+    }
+    acc.daily.set(key, d);
     byModel.set(row.model, acc);
   }
   return byModel;
@@ -88,6 +95,8 @@ export async function collect(
       inputTokens: prompt,
       h: prompt > 0 ? Math.min(u.cached / prompt, 1) : config.defaultProfile.h,
       r: prompt > 0 ? u.completion / prompt : config.defaultProfile.r,
+      requests: u.requests,
+      daily: [...u.daily.values()].sort((a, b) => a.day.localeCompare(b.day)),
       source: "usage",
     });
   }

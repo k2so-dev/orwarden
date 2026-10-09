@@ -3,6 +3,7 @@ import { classifyModel, modelMinQuantization, modelMinQuantRank, quantRank } fro
 import { routingWeight, unitCost } from "../core/cost.ts";
 import { pricePerMillion } from "../core/forecast.ts";
 import type { ProviderState } from "../core/hysteresis.ts";
+import { confidenceOf, presetEstimate, workloadDrift, type Confidence, type Estimate } from "../core/estimate.ts";
 import { endpointStability, NEUTRAL_STABILITY, type HistoryInputs, type Stability } from "../core/stability.ts";
 import type { Guardrail } from "../core/openrouter.ts";
 import { admissibleCount, optimize, totalCount, violations, type Violation } from "../core/optimizer.ts";
@@ -102,6 +103,7 @@ export type ModelView = {
   counts: { ok: number; outlier: number; hardBad: number };
   presetId: string | null;
   cost: CostTriple;
+  estimate: Estimate | null;
   scenarios: ({ name: string; tools: boolean; h: number; r: number; inputPerDay: number } & CostTriple)[];
   endpoints: EndpointView[];
   warnings: Warning[];
@@ -115,7 +117,7 @@ export type Overview = {
   usageDays: number;
   scenario: { name: string; tokensPerDay: number; tools: boolean | null; h: number | null; r: number | null };
   scenarios: string[];
-  summary: { default: number; bans: number; presets: number; riskShare: number };
+  summary: { default: number; bans: number; presets: number; presetsLow: number; presetsHigh: number; confidence: Confidence; riskShare: number };
   models: ModelView[];
 };
 
@@ -500,6 +502,23 @@ function costs(model: ClassifiedModel, ranked: ClassifiedEndpoint[] | null, curr
   };
 }
 
+function modelEstimate(input: ModelInput, calc: ModelCalc, ranked: ClassifiedEndpoint[] | null, current: ReadonlySet<string>, profile: Profile, days: number): Estimate | null {
+  if (!ranked) return null;
+  const members = servable(ranked, profile.tools).map((e) => ({ endpoint: e, stability: calc.stability.get(e) ?? NEUTRAL_STABILITY }));
+  const tokens = profile.inputPerDay * days;
+  const live = calc.model.endpoints.filter((e) => !current.has(e.provider) && (!profile.tools || e.tools)).map((e) => (unitCost(e, profile.h, profile.r) * tokens) / 1_000_000);
+  return presetEstimate({
+    members,
+    h: profile.h,
+    r: profile.r,
+    tokens,
+    drift: profile.name === DEFAULT_SCENARIO && !profile.estimated ? workloadDrift(input.daily) : null,
+    contextTokens: input.requests ? input.inputTokens / input.requests : null,
+    estimated: profile.estimated,
+    defaultRange: live.length > 1 ? { low: Math.min(...live), high: Math.max(...live) } : null,
+  });
+}
+
 function emptyWarning(calc: ModelCalc, banned: ReadonlySet<string>, zdrOnly: boolean, qualityTitle: string, multi: boolean, scope: "preset" | "view"): Warning {
   const good = calc.model.endpoints.filter((e) => e.cls === "ok");
   const quantOk = calc.model.endpoints.some((e) => e.quant === "ok" || e.quant === "closed");
@@ -548,7 +567,8 @@ export function buildOverview(ctx: Ctx): Overview {
   const current = currentBans(snapshot);
   const desired = desiredBans(ctx.bans);
   const slugs = trackedSlugs(snapshot.models, settings, ctx.presets);
-  const summary = { default: 0, bans: 0, presets: 0, riskShare: 0 };
+  const summary = { default: 0, bans: 0, presets: 0, presetsLow: 0, presetsHigh: 0, confidence: "high" as Confidence, riskShare: 0 };
+  const estimates: Estimate[] = [];
   let riskVolume = 0;
   let volume = 0;
 
@@ -564,6 +584,10 @@ export function buildOverview(ctx: Ctx): Overview {
     summary.default += cost.default ?? 0;
     summary.bans += cost.bans ?? cost.default ?? 0;
     summary.presets += cost.preset ?? cost.bans ?? cost.default ?? 0;
+    const estimate = presetCalc ? modelEstimate(input, basisCalc, presetRanked, current, profile, days) : null;
+    summary.presetsLow += estimate?.low ?? cost.bans ?? cost.default ?? 0;
+    summary.presetsHigh += estimate?.high ?? cost.bans ?? cost.default ?? 0;
+    if (estimate) estimates.push(estimate);
     const routed = model.endpoints.reduce((s, e) => s + shares.get(e)!, 0);
     if (input.openWeights !== false && routed > 0) {
       riskVolume += model.endpoints.reduce((s, e) => s + (e.quant === "low" || e.quant === "unknown" ? shares.get(e)! : 0), 0) * profile.inputPerDay;
@@ -649,6 +673,7 @@ export function buildOverview(ctx: Ctx): Overview {
       },
       presetId: presetCalc ? `@preset/${slugs.get(model.slug)!}` : null,
       cost,
+      estimate,
       scenarios: scenarioRows,
       endpoints,
       warnings,
@@ -657,6 +682,7 @@ export function buildOverview(ctx: Ctx): Overview {
 
   models.sort((a, b) => (b.cost.default ?? 0) - (a.cost.default ?? 0) || a.slug.localeCompare(b.slug));
   summary.riskShare = volume > 0 ? riskVolume / volume : 0;
+  summary.confidence = confidenceOf(estimates.filter((e) => e.value >= summary.presets * 0.05).flatMap((e) => e.risks));
   const named = settings.scenarios.profiles.find((p) => p.name === q.scenario);
   return {
     takenAt: snapshot.takenAt,
@@ -818,6 +844,7 @@ export type PresetView = {
   policy: { quantizations: string[]; minQuantization: string | null; zdr: boolean; tools: boolean; fallbacks: boolean };
   perM: { default: number | null; preset: number | null };
   cost: { default: number | null; preset: number | null; saving: number | null; savingPct: number | null };
+  estimate: Estimate | null;
   scenarios: PresetScenario[];
   config: ReturnType<typeof presetConfig>;
   hash: string;
@@ -934,6 +961,7 @@ export function buildPresets(ctx: Ctx, remote: ReadonlyMap<string, RemotePreset>
           saving: money.default !== null && money.preset !== null ? money.preset - money.default : null,
           savingPct: money.default && money.preset !== null ? (money.preset - money.default) / money.default : null,
         },
+        estimate: modelEstimate(input, calc, ranked, current, profile, days),
         scenarios,
         config,
         hash,

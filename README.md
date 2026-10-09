@@ -126,6 +126,19 @@ This is the "With presets" figure; the real cost is at most this. It is compared
 - **Default routing:** what OpenRouter does without a preset. It spreads traffic across all non-ignored endpoints with weight `uptime / p²`, where `p` is `p_in` by default (`optimizer.routingPrice` in the settings API switches it to `p_in + p_out` or the blended `C`).
 - **With global bans:** the same spread after the ban list is applied.
 
+**Range and risks.** Every preset estimate also carries a low end, a high end, a confidence (high, medium, low) and the risks behind them. The low end is the cheapest listed provider. The high end adds the money each risk can cost:
+
+| Risk | Source | Added to the high end |
+| --- | --- | --- |
+| `routing` | OpenRouter picks the provider inside the list | nothing, it explains the low–headline gap |
+| `price-volatility` | listed providers changed price in the last 30 days | headline × (largest swing − 1) |
+| `fallback-cache` | a listed provider can fail and the request re-reads its cached context elsewhere | worst downtime × `h` × (`p_in` − `p_cache`) × volume |
+| `workload-drift` | the daily cache hit and output/input ratio of your traffic vary | cost at `h − σ`, `r + σ` minus the headline |
+| `default-model` | default routing is a model of OpenRouter's spread | nothing, it shows the range the default could have |
+| `thin-data` | providers younger than 7 days, or no recent traffic | nothing, it lowers confidence |
+
+Confidence is low when any risk is bad (a price swing of 25% or more), medium when any risk is a warning or data is thin, and high otherwise. The summary uses the risks of models that make up at least 5% of the preset spend.
+
 ### Global bans
 
 The ban optimizer writes the guardrail's `ignored_providers`:

@@ -28,6 +28,20 @@ describe("aggregateUsage", () => {
     expect(usage.get("x/alpha")!.prompt).toBe(7000);
   });
 
+  test("keeps requests and a per-day breakdown across providers", () => {
+    const usage = aggregateUsage(
+      [row("2026-10-05 00:00:00", 100, 0), { ...row("2026-10-06 00:00:00", 100, 0), provider_name: "A" }, { ...row("2026-10-06 00:00:00", 100, 0), provider_name: "B" }],
+      7,
+      new Date("2026-10-07T12:00:00Z"),
+    );
+    const u = usage.get("x/alpha")!;
+    expect(u.requests).toBe(3);
+    expect([...u.daily.values()].map((d) => [d.day, d.prompt])).toEqual([
+      ["2026-10-05", 1000],
+      ["2026-10-06", 2000],
+    ]);
+  });
+
   test("drops rows outside the window", () => {
     const usage = aggregateUsage(
       [row("2026-10-06 00:00:00", 100, 0), row("2026-09-01 00:00:00", 100, 0)],

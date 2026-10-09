@@ -8,6 +8,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import Segmented from "@/components/app/Segmented.vue";
 import StatusBadge from "@/components/app/StatusBadge.vue";
 import { presetStatus, type PresetStatusInfo } from "@/lib/presetStatus";
+import { CONFIDENCE, riskLines } from "@/lib/estimate";
 import { columns, density, modelOpen, setModelOpen } from "@/stores/ui";
 import { KINDS, kindOf } from "@/stores/filters";
 import Tip from "@/components/app/Tip.vue";
@@ -42,6 +43,13 @@ const kindTip = computed(() => [
   { text: kind.value.hint, tone: "fg" as const },
   { text: `From ${usageDays.value}-day traffic: cache hit ${pct(props.model.h)}, output/input ${props.model.r.toFixed(2)}`, tone: "muted" as const },
 ]);
+
+const estimate = computed(() => props.model.estimate);
+const estimateTip = computed(() => {
+  const e = estimate.value;
+  if (!e) return [];
+  return [{ text: `${money(e.value)} expected, from ${money(e.low)} to ${money(e.high)} over ${periodLabel(overview.value?.horizonDays ?? 7)} · ${CONFIDENCE[e.confidence].text}`, tone: "fg" as const }, ...riskLines(e.risks)];
+});
 
 const COLUMN_ITEMS = [
   { key: "zt", label: "ZDR & Tools" },
@@ -87,6 +95,9 @@ const densityModel = computed({
         </span>
       </div>
       <div class="ml-auto flex items-center gap-1.5" @click.stop @keydown.stop>
+        <Tip v-if="estimate" title="Preset cost estimate" :lines="estimateTip">
+          <StatusBadge :kind="CONFIDENCE[estimate.confidence].kind" class="tnum h-[22px] px-2 text-[11.5px]">{{ money(estimate.low) }}–{{ money(estimate.high) }}</StatusBadge>
+        </Tip>
         <StatusBadge :kind="presetState.kind" :title="presetState.tip" class="h-[22px] px-2 text-[11.5px]">{{ presetState.text }}</StatusBadge>
         <button
           v-if="model.presetId"

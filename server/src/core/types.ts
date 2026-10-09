@@ -15,6 +15,8 @@ export type Endpoint = {
   zdr: boolean;
 };
 
+export type UsageDay = { day: string; usd: number; prompt: number; completion: number; cached: number; requests: number };
+
 export type ModelInput = {
   slug: string;
   name: string;
@@ -24,6 +26,8 @@ export type ModelInput = {
   source: "usage" | "watchlist";
   openWeights?: boolean;
   inputTokens: number;
+  requests?: number;
+  daily?: UsageDay[];
   endpoints: Endpoint[];
 };
 
