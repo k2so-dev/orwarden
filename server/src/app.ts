@@ -225,7 +225,7 @@ export function createApp(rt: Runtime) {
     .put(
       "/providers/:slug/policy",
       zValidator("param", z.object({ slug: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,63}$/) })),
-      zValidator("json", z.object({ policy: z.enum(["ban", "allow"]).nullable() })),
+      zValidator("json", z.object({ policy: z.enum(["ban"]).nullable() })),
       (c) => {
         const { slug } = c.req.valid("param");
         const { policy } = c.req.valid("json");
@@ -235,10 +235,10 @@ export function createApp(rt: Runtime) {
     )
     .post(
       "/bans/apply",
-      zValidator("json", z.object({ force: z.boolean().default(false), dryRun: z.boolean().default(false), view: ViewQuerySchema.optional() })),
+      zValidator("json", z.object({ dryRun: z.boolean().default(false), view: ViewQuerySchema.optional() })),
       async (c) => {
-        const { force, dryRun, view } = c.req.valid("json");
-        const result = await rt.exclusive(() => applyBans(rt, { force, dryRun }));
+        const { dryRun, view } = c.req.valid("json");
+        const result = await rt.exclusive(() => applyBans(rt, { dryRun }));
         const ctx = {
           snapshot: rt.requireSnapshot(),
           settings: rt.settings(),

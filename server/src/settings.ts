@@ -29,7 +29,6 @@ export const SettingsSchema = z.object({
   filters: z.object({
     minQuantization: z.string(),
     nativeQuantization: z.record(z.string(), z.string()),
-    banLowQuantProviders: z.boolean(),
     zdrOnly: z.boolean(),
     requireTools: z.boolean(),
     minUptime: ratio,
@@ -40,12 +39,8 @@ export const SettingsSchema = z.object({
   optimizer: z.object({
     minEndpointsPerModel: z.number().int().min(1).max(10),
     routingPrice: z.enum(["prompt", "prompt_plus_completion", "blended"]),
-    minImprovement: z.number().min(0).max(1),
-    maxMoves: z.number().int().min(0).max(200),
-    maxChangesPerRun: z.number().int().min(1).max(50),
     minOutRatio: z.number().min(0).max(50),
     penalties: z.object({ hardBad: z.number().min(1), outputOutlier: z.number().min(1), cacheOutlier: z.number().min(1) }),
-    hysteresis: z.object({ banAfterRuns: z.number().int().min(1), unbanAfterRuns: z.number().int().min(1) }),
   }),
   scoring: z.object({
     price: z.number().min(0),
@@ -124,7 +119,6 @@ export const DEFAULT_SETTINGS: Settings = {
   filters: {
     minQuantization: "fp8",
     nativeQuantization: { "openai/gpt-oss": "fp4" },
-    banLowQuantProviders: true,
     zdrOnly: false,
     requireTools: false,
     minUptime: 0.97,
@@ -135,12 +129,8 @@ export const DEFAULT_SETTINGS: Settings = {
   optimizer: {
     minEndpointsPerModel: 2,
     routingPrice: "prompt",
-    minImprovement: 0.01,
-    maxMoves: 20,
-    maxChangesPerRun: 3,
     minOutRatio: 0.5,
     penalties: { hardBad: 3, outputOutlier: 5, cacheOutlier: 1.5 },
-    hysteresis: { banAfterRuns: 2, unbanAfterRuns: 3 },
   },
   scoring: { price: 60, speed: 20, reliability: 20, stability: 10, unknownQuantPenalty: 15 },
   presets: { topN: 5, slugPattern: "{model}-safe", defaultScenario: "actual", rankBy: "score", holdHours: 24, holdMaxUsd: 1 },

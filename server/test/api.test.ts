@@ -171,11 +171,17 @@ describe("api flow", () => {
     expect(catalog.body[0].usageUsd).toBeGreaterThan(0);
   });
 
+  test("scheduled refresh never touches the guardrail, even in apply mode", async () => {
+    await ctx.call("/api/settings", { method: "PUT", body: { mode: "apply" } });
+    for (let i = 0; i < 4; i++) await ctx.rt.exclusive(() => import("../src/services/refresh.ts").then((m) => m.refresh(ctx.rt, true)));
+    expect(ctx.mock.calls.patches).toEqual([]);
+    expect(ctx.mock.guardrail.ignored_providers).toEqual(["relace"]);
+  });
+
   test("scheduled refresh in dry-run never patches", async () => {
     await ctx.rt.exclusive(() => import("../src/services/refresh.ts").then((m) => m.refresh(ctx.rt, true)));
     await ctx.rt.exclusive(() => import("../src/services/refresh.ts").then((m) => m.refresh(ctx.rt, true)));
     expect(ctx.mock.calls.patches).toEqual([]);
-    expect(ctx.store.loadStates().size).toBeGreaterThan(0);
   });
 
   test("scheduled auto-sync in dry-run never writes presets", async () => {

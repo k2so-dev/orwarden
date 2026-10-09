@@ -1,9 +1,5 @@
-import { classifyAll } from "../core/classify.ts";
-import { autoSet, type ProviderState } from "../core/hysteresis.ts";
-import { preflight, type Reverted } from "../core/preflight.ts";
-import type { Violation } from "../core/optimizer.ts";
 import type { Decision, RunKind } from "../db.ts";
-import { allowedProviders, desiredBans, fixedBans, historyEntries, type HistoryEntry } from "./analysis.ts";
+import { desiredBans, historyEntries, type HistoryEntry } from "./analysis.ts";
 import { AppError, type Runtime } from "./state.ts";
 
 export const sorted = (xs: Iterable<string>) => [...new Set(xs)].sort();
@@ -21,8 +17,6 @@ export type ApplyResult = {
   added: string[];
   removed: string[];
   patched: boolean;
-  reverted: Reverted[];
-  unresolved: Violation[];
 };
 
 export async function resolveGuardrailId(rt: Runtime): Promise<string> {
@@ -36,41 +30,16 @@ export async function resolveGuardrailId(rt: Runtime): Promise<string> {
   return ws.default_guardrail_id;
 }
 
-export function releaseAuto(states: Map<string, ProviderState>, providers: Iterable<string>): void {
-  for (const p of providers) {
-    const s = states.get(p);
-    if (s) s.autoBanned = false;
-    if (s && s.banStreak === 0 && s.cleanStreak === 0) states.delete(p);
-  }
-}
-
-export async function applyBans(
-  rt: Runtime,
-  opts: { kind?: RunKind; force?: boolean; dryRun?: boolean; decisions?: Decision[] } = {},
-): Promise<ApplyResult> {
+export async function applyBans(rt: Runtime, opts: { kind?: RunKind; dryRun?: boolean } = {}): Promise<ApplyResult> {
   const settings = rt.settings();
   const snapshot = rt.requireSnapshot();
   const client = await rt.client();
   const startedAt = rt.now().toISOString();
-  const policies = rt.store.policies();
-  const states = rt.store.loadStates();
-  const fixed = fixedBans({ policies, states });
-  const allowed = allowedProviders({ policies, states });
-  const models = classifyAll(snapshot.models, settings);
-  const auto = new Set([...autoSet(states)].filter((p) => !allowed.has(p) && !fixed.has(p)));
-  const pre = preflight(models, fixed, auto, [], settings.optimizer.minEndpointsPerModel);
-  if (pre.unresolved.length > 0 && !opts.force) {
-    throw new AppError(422, "would-break-models", "Bans would leave models without enough providers", pre.unresolved);
-  }
-  if (pre.reverted.length > 0 && !opts.dryRun) {
-    releaseAuto(states, pre.reverted.map((r) => r.provider));
-    rt.store.saveStates(states);
-  }
 
   const guardrailId = snapshot.workspace.guardrailId;
   const guardrail = await client.getGuardrail(guardrailId);
   const before = sorted((guardrail.ignored_providers ?? []).map((p) => p.toLowerCase()));
-  const after = sorted([...fixed, ...pre.auto]);
+  const after = sorted(desiredBans(rt.banInputs()));
   let patched = false;
   if (opts.dryRun) {
     return {
@@ -81,8 +50,6 @@ export async function applyBans(
       added: after.filter((p) => !before.includes(p)),
       removed: before.filter((p) => !after.includes(p)),
       patched: false,
-      reverted: pre.reverted,
-      unresolved: pre.unresolved,
     };
   }
   if (!sameSet(before, after)) {
@@ -90,28 +57,16 @@ export async function applyBans(
     rt.setSnapshot({ ...snapshot, guardrail: updated });
     patched = true;
   }
-  const decisions: Decision[] = [
-    ...(opts.decisions ?? []),
-    ...pre.reverted.map((r) => ({
-      provider: r.provider,
-      action: "preflight-revert",
-      reason: `${r.slug} would keep ${r.admissible}/${r.required} good endpoints`,
-      delta: null,
-    })),
-  ];
-  const runId = rt.store.saveRun(
-    {
-      startedAt,
-      kind: opts.kind ?? "apply",
-      mode: settings.mode,
-      status: "ok",
-      ignoredBefore: before,
-      ignoredAfter: after,
-      patched,
-      error: null,
-    },
-    decisions,
-  );
+  const runId = rt.store.saveRun({
+    startedAt,
+    kind: opts.kind ?? "apply",
+    mode: settings.mode,
+    status: "ok",
+    ignoredBefore: before,
+    ignoredAfter: after,
+    patched,
+    error: null,
+  });
   return {
     runId,
     dryRun: false,
@@ -120,8 +75,6 @@ export async function applyBans(
     added: after.filter((p) => !before.includes(p)),
     removed: before.filter((p) => !after.includes(p)),
     patched,
-    reverted: pre.reverted,
-    unresolved: pre.unresolved,
   };
 }
 
@@ -138,12 +91,7 @@ export async function rollback(rt: Runtime, runId?: number): Promise<RollbackRes
   const from = sorted((guardrail.ignored_providers ?? []).map((p) => p.toLowerCase()));
   const now = rt.now().toISOString();
 
-  const states = rt.store.loadStates();
-  const keepAuto = new Set([...autoSet(states)].filter((p) => to.includes(p)));
-  releaseAuto(states, [...autoSet(states)].filter((p) => !keepAuto.has(p)));
-  rt.store.saveStates(states);
-  rt.store.replaceBanPolicies(to.filter((p) => !keepAuto.has(p)), now);
-  for (const [p, policy] of rt.store.policies()) if (policy === "allow" && to.includes(p)) rt.store.setPolicy(p, null, now);
+  rt.store.replaceBanPolicies(to, now);
 
   let patched = false;
   if (!sameSet(from, to)) {
@@ -178,10 +126,6 @@ export function pendingDiff(rt: Runtime): { current: string[]; desired: string[]
 export function discardDrafts(rt: Runtime): { policies: number } {
   const snap = rt.requireSnapshot();
   const current = sorted((snap.guardrail.ignored_providers ?? []).map((p) => p.toLowerCase()));
-  const states = rt.store.loadStates();
-  releaseAuto(states, [...autoSet(states)].filter((p) => !current.includes(p)));
-  rt.store.saveStates(states);
-  const now = rt.now().toISOString();
-  rt.store.replaceBanPolicies(current.filter((p) => !autoSet(states).has(p)), now);
+  rt.store.replaceBanPolicies(current, rt.now().toISOString());
   return { policies: current.length };
 }

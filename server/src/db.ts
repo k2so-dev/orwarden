@@ -1,12 +1,11 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import type { ProviderState } from "./core/hysteresis.ts";
 import type { ModelOverrides } from "./settings.ts";
 
 export type RunKind = "refresh" | "scheduled" | "apply" | "rollback";
 export type RunStatus = "ok" | "failed";
-export type Policy = "ban" | "allow";
+export type Policy = "ban";
 
 export type RunRecord = {
   id: number;
@@ -76,9 +75,6 @@ create table if not exists endpoint_state (
   p_in real not null, p_out real not null, p_cache real not null, quantization text not null,
   first_seen text not null, last_seen text not null,
   primary key (model, tag, slot)
-);
-create table if not exists provider_state (
-  provider text primary key, auto_banned integer not null, ban_streak integer not null, clean_streak integer not null
 );
 create table if not exists provider_policy (provider text primary key, policy text not null, updated_at text not null);
 create table if not exists runs (
@@ -177,6 +173,8 @@ export class Store {
     if (!columns.some((c) => c.name === "verdict")) this.db.exec("alter table endpoint_history add column verdict text;");
     const presetColumns = this.db.query<{ name: string }, []>("pragma table_info(presets)").all();
     if (!presetColumns.some((c) => c.name === "overrides")) this.db.exec("alter table presets add column overrides text not null default '{}';");
+    this.db.exec("drop table if exists provider_state;");
+    this.db.exec("delete from provider_policy where policy <> 'ban';");
   }
 
   getValue<T>(key: string): T | null {
@@ -323,32 +321,6 @@ export class Store {
          from endpoint_history where model = ? and ts >= ? order by ts, tag`,
       )
       .all(model, since);
-  }
-
-  loadStates(): Map<string, ProviderState> {
-    const rows = this.db
-      .query<{ provider: string; auto_banned: number; ban_streak: number; clean_streak: number }, []>(
-        "select * from provider_state order by provider",
-      )
-      .all();
-    return new Map(
-      rows.map((r) => [
-        r.provider,
-        { provider: r.provider, autoBanned: r.auto_banned === 1, banStreak: r.ban_streak, cleanStreak: r.clean_streak },
-      ]),
-    );
-  }
-
-  saveStates(states: ReadonlyMap<string, ProviderState>): void {
-    this.db.transaction(() => {
-      this.db.exec("delete from provider_state");
-      const put = this.db.query(
-        "insert into provider_state (provider, auto_banned, ban_streak, clean_streak) values ($provider, $auto, $ban, $clean)",
-      );
-      for (const s of states.values()) {
-        put.run({ provider: s.provider, auto: s.autoBanned ? 1 : 0, ban: s.banStreak, clean: s.cleanStreak });
-      }
-    })();
   }
 
   policies(): Map<string, Policy> {

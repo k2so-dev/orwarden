@@ -61,12 +61,6 @@ const btn = "h-[34px] rounded-lg px-3.5 text-[13px] font-medium";
           <span class="whitespace-pre">{{ l.text }}</span>
         </div>
       </div>
-      <div v-for="r in plan?.reverted ?? []" :key="r.provider" class="rounded-lg bg-warn-bg px-3 py-2 text-[12.5px] text-warn">
-        Skipped ban of {{ r.provider }}: {{ r.slug }} would keep {{ r.admissible }} of {{ r.required }} good endpoints.
-      </div>
-      <div v-for="v in plan?.unresolved ?? []" :key="v.slug" class="rounded-lg bg-warn-bg px-3 py-2 text-[12.5px] text-warn">
-        {{ v.slug }} keeps only {{ v.admissible }} of {{ v.required }} good endpoints.
-      </div>
       <div v-if="dryRun" class="rounded-lg bg-warn-bg px-3 py-[9px] text-[12.5px] text-warn">
         Dry-run is on — nothing will be written. Switch to Apply in the header to write this diff.
       </div>

@@ -21,7 +21,7 @@ async function setMode(value: string): Promise<void> {
   if (value === "apply") {
     const ok = await confirmAction(
       "Switch to Apply?",
-      "Write buttons, scheduled bans and preset auto-sync will change the guardrail and presets on OpenRouter for every app in this workspace.",
+      "Write buttons and preset auto-sync will change the guardrail and presets on OpenRouter for every app in this workspace.",
       "Switch to Apply",
     );
     if (!ok) return;

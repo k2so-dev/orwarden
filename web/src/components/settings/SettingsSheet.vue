@@ -270,16 +270,6 @@ const btn = "h-8 rounded-lg border border-border bg-background px-3 text-[13px] 
         <div :class="row">
           <span class="font-medium">Min good providers per model</span>
           <input v-model.number="s.optimizer.minEndpointsPerModel" type="number" min="1" max="10" :class="num" />
-          <div>
-            <div class="font-medium">Hysteresis</div>
-            <div class="text-xs text-muted-foreground">ban after N bad runs / unban after M good runs</div>
-          </div>
-          <div class="flex gap-1.5">
-            <input v-model.number="s.optimizer.hysteresis.banAfterRuns" type="number" min="1" :class="[num, 'w-14']" />
-            <input v-model.number="s.optimizer.hysteresis.unbanAfterRuns" type="number" min="1" :class="[num, 'w-14']" />
-          </div>
-          <span class="font-medium">Max changes per run</span>
-          <input v-model.number="s.optimizer.maxChangesPerRun" type="number" min="1" max="50" :class="num" />
         </div>
 
         <div :class="section">Presets</div>

@@ -44,17 +44,11 @@ const reasons = computed<TipLine[]>(() => [
 
 const ban = computed(() => {
   const b = props.row.ban;
-  const runs = settings.value?.optimizer.hysteresis.banAfterRuns ?? 2;
   if (b.inGuardrail && b.inDesired) {
-    return b.auto
-      ? { kind: "bad" as BadgeKind, text: "banned (auto)", tip: `Auto-banned: bad on ${runs} of ${runs} consecutive runs. Applies to every model and every app.` }
-      : { kind: "bad" as BadgeKind, text: "banned (manual)", tip: "Banned manually. Applies to every model and every app." };
+    return { kind: "bad" as BadgeKind, text: "banned", tip: "Banned in the guardrail. Applies to every model and every app." };
   }
   if (b.inGuardrail) return { kind: "warn" as BadgeKind, text: "unban pending", tip: "Unban is in the draft — press Apply on the Providers tab." };
   if (b.inDesired) return { kind: "warn" as BadgeKind, text: "ban pending", tip: "Ban is in the draft — not written yet. Press Apply on the Providers tab." };
-  if (b.pending?.action === "ban") {
-    return { kind: "warn" as BadgeKind, text: "candidate", tip: `Ban candidate (${b.pending.streak} of ${b.pending.needed} runs). Auto-ban after ${b.pending.needed} consecutive bad runs.` };
-  }
   return { kind: "none" as BadgeKind, text: "—", tip: "Not banned. Global bans remove a provider from all models." };
 });
 

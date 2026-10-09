@@ -152,7 +152,7 @@ export class Runtime {
   }
 
   banInputs(): BanInputs {
-    return { policies: this.store.policies(), states: this.store.loadStates() };
+    return { policies: this.store.policies() };
   }
 
   get isBusy(): boolean {

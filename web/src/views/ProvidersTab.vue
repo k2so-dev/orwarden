@@ -17,9 +17,9 @@ const pending = computed(() => providers.value?.pending ?? null);
 const pendingCount = computed(() => (pending.value?.added.length ?? 0) + (pending.value?.removed.length ?? 0));
 const VERDICT: Record<string, BadgeKind> = { ok: "ok", outlier: "warn", "hard-bad": "bad" };
 const GRID = "grid grid-cols-[190px_170px_minmax(280px,1fr)_minmax(220px,.8fr)_150px_160px_64px] min-w-[1180px] items-center";
-const BAN_TIP = "On: the provider is ignored for every request. Turning off an auto-ban keeps it allowed until you turn it on again.";
+const BAN_TIP = "On: the provider is ignored for every request once you apply the draft.";
 
-const rank = (r: ProviderRow) => (r.ban.inDesired ? 0 : r.ban.pending ? 1 : 2);
+const rank = (r: ProviderRow) => (r.ban.inDesired || r.ban.inGuardrail ? 0 : 1);
 const rows = computed(() =>
   [...(providers.value?.rows ?? [])].sort(
     (a, b) => rank(a) - rank(b) || (a.effectPct ?? Infinity) - (b.effectPct ?? Infinity) || a.provider.localeCompare(b.provider),
@@ -27,10 +27,7 @@ const rows = computed(() =>
 );
 
 function status(r: ProviderRow): { kind: BadgeKind; text: string } {
-  if (r.ban.inGuardrail) return { kind: "bad", text: r.ban.auto && r.ban.policy !== "ban" ? "auto ban" : "manual ban" };
-  if (r.ban.policy === "allow") return { kind: "ok", text: "always allowed" };
-  const p = r.ban.pending;
-  if (p) return { kind: "warn", text: `${p.action === "ban" ? "pending" : "unban"} ${p.streak} of ${p.needed} runs` };
+  if (r.ban.inGuardrail) return { kind: "bad", text: "banned" };
   return { kind: "none", text: "none" };
 }
 
@@ -63,7 +60,7 @@ function effect(r: ProviderRow): { text: string; pct: string; tone: string } {
 }
 
 async function setBan(r: ProviderRow, on: boolean) {
-  const policy = on ? "ban" : r.ban.auto ? "allow" : null;
+  const policy = on ? "ban" : null;
   if (policy === r.ban.policy) return;
   await act(() => unwrap(client.providers[":slug"].policy.$put({ param: { slug: r.provider }, json: { policy } })));
   await reloadAfterWrite();
@@ -121,10 +118,7 @@ async function rollback(h: HistoryItem) {
 }
 
 function who(h: HistoryItem): string {
-  if (h.source === "manual") return "manual · you";
-  if (h.source === "rollback") return "rollback · you";
-  const reasons = [...new Set(h.decisions.filter((d) => d.action === "ban" || d.action === "unban").map((d) => d.reason))];
-  return reasons.length ? `auto · ${reasons.join("; ")}` : "auto · scheduled run";
+  return h.source === "rollback" ? "rollback · you" : h.source === "manual" ? "manual · you" : "scheduled run";
 }
 
 const entries = computed(() => history.value.filter((h) => h.added.length + h.removed.length > 0));

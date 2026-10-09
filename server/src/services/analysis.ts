@@ -2,12 +2,11 @@ import { createHash } from "node:crypto";
 import { classifyModel, modelMinQuantization, modelMinQuantRank, quantRank } from "../core/classify.ts";
 import { routingWeight, unitCost } from "../core/cost.ts";
 import { pricePerMillion } from "../core/forecast.ts";
-import type { ProviderState } from "../core/hysteresis.ts";
 import { CHANGE_THRESHOLD, isSignificant, priceChanges, type PriceChange } from "../core/changes.ts";
 import { calibrate, confidenceOf, presetEstimate, workloadDrift, type Calibration, type Confidence, type Estimate } from "../core/estimate.ts";
 import { endpointStability, NEUTRAL_STABILITY, type HistoryInputs, type Stability } from "../core/stability.ts";
 import type { Guardrail } from "../core/openrouter.ts";
-import { admissibleCount, optimize, totalCount, violations, type Violation } from "../core/optimizer.ts";
+import { admissibleCount, totalCount, violations } from "../core/coverage.ts";
 import type { ClassifiedEndpoint, ClassifiedModel, Issue, ModelInput } from "../core/types.ts";
 import { HISTORY_DAYS, type Hold, type Policy, type PresetSettings, type PriceEvent, type RunRecord } from "../db.ts";
 import { modelSettings, PRESET_SLUG_RE, type ModelOverrides, type Settings } from "../settings.ts";
@@ -40,10 +39,7 @@ export type ViewQuery = {
   wStability?: number;
 };
 
-export type BanInputs = {
-  policies: ReadonlyMap<string, Policy>;
-  states: ReadonlyMap<string, ProviderState>;
-};
+export type BanInputs = { policies: ReadonlyMap<string, Policy> };
 
 export type Profile = { name: string; h: number; r: number; tools: boolean; inputPerDay: number; estimated: boolean };
 
@@ -51,10 +47,8 @@ export type Scores = { price: number; speed: number; reliability: number; stabil
 
 export type BanStatus = {
   policy: Policy | null;
-  auto: boolean;
   inGuardrail: boolean;
   inDesired: boolean;
-  pending: { action: "ban" | "unban"; streak: number; needed: number } | null;
 };
 
 export type EndpointView = {
@@ -182,37 +176,15 @@ export function resolveProfile(model: ModelInput, settings: Settings, q: ViewQue
 }
 
 export function desiredBans(inputs: BanInputs): Set<string> {
-  const out = new Set<string>();
-  for (const [p, policy] of inputs.policies) if (policy === "ban") out.add(p);
-  for (const s of inputs.states.values()) if (s.autoBanned && inputs.policies.get(s.provider) !== "allow") out.add(s.provider);
-  return out;
-}
-
-export function fixedBans(inputs: BanInputs): Set<string> {
-  return new Set([...inputs.policies].filter(([, v]) => v === "ban").map(([k]) => k));
-}
-
-export function allowedProviders(inputs: BanInputs): Set<string> {
-  return new Set([...inputs.policies].filter(([, v]) => v === "allow").map(([k]) => k));
+  return new Set([...inputs.policies].filter(([, policy]) => policy === "ban").map(([provider]) => provider));
 }
 
 export function currentBans(snapshot: AppSnapshot): Set<string> {
   return new Set((snapshot.guardrail.ignored_providers ?? []).map((p) => p.toLowerCase()));
 }
 
-function banStatus(provider: string, inputs: BanInputs, current: Set<string>, desired: Set<string>, settings: Settings): BanStatus {
-  const s = inputs.states.get(provider);
-  const { banAfterRuns, unbanAfterRuns } = settings.optimizer.hysteresis;
-  let pending: BanStatus["pending"] = null;
-  if (s && !s.autoBanned && s.banStreak > 0) pending = { action: "ban", streak: s.banStreak, needed: banAfterRuns };
-  if (s && s.autoBanned && s.cleanStreak > 0) pending = { action: "unban", streak: s.cleanStreak, needed: unbanAfterRuns };
-  return {
-    policy: inputs.policies.get(provider) ?? null,
-    auto: Boolean(s?.autoBanned),
-    inGuardrail: current.has(provider),
-    inDesired: desired.has(provider),
-    pending,
-  };
+function banStatus(provider: string, inputs: BanInputs, current: Set<string>, desired: Set<string>): BanStatus {
+  return { policy: inputs.policies.get(provider) ?? null, inGuardrail: current.has(provider), inDesired: desired.has(provider) };
 }
 
 const clamp = (v: number, lo = 0, hi = 1) => Math.min(Math.max(v, lo), hi);
@@ -695,7 +667,7 @@ export function buildOverview(ctx: Ctx): Overview {
           eligible: isEligible(e, profile, desired, view.zdrOnly),
           presetRank: presetRank.get(i) ?? null,
           held: heldView(basisCalc.held.get(basisCalc.model.endpoints[i]!)),
-          ban: banStatus(e.provider, ctx.bans, current, desired, settings),
+          ban: banStatus(e.provider, ctx.bans, current, desired),
         };
       })
       .filter((e) => !q.hideBanned || !e.ban.inDesired)
@@ -779,7 +751,6 @@ export type ProviderRow = {
   provider: string;
   name: string;
   ban: BanStatus;
-  inTarget: boolean;
   models: { slug: string; name: string; tags: string[]; verdict: ClassifiedEndpoint["cls"]; quantization: string[]; reasons: string[] }[];
   worst: string | null;
   effect: number | null;
@@ -793,7 +764,7 @@ export type ProvidersView = {
   horizonDays: number;
   mode: Settings["mode"];
   rows: ProviderRow[];
-  pending: { current: string[]; desired: string[]; added: string[]; removed: string[]; violations: Violation[] };
+  pending: { current: string[]; desired: string[]; added: string[]; removed: string[] };
 };
 
 const SEVERITY: Record<ClassifiedEndpoint["cls"], number> = { "hard-bad": 2, outlier: 1, ok: 0 };
@@ -804,10 +775,8 @@ export function buildProviders(ctx: Ctx): ProvidersView {
   const days = q.days ?? settings.scenarios.days;
   const current = currentBans(snapshot);
   const desired = desiredBans(ctx.bans);
-  const fixed = fixedBans(ctx.bans);
   const models = snapshot.models.map((m) => classifyModel(m, vs));
   const profiles = modelProfiles(ctx);
-  const target = optimize(models, fixed, vs, allowedProviders(ctx.bans)).target;
   const k = settings.optimizer.minEndpointsPerModel;
 
   const names = new Map<string, string>();
@@ -834,12 +803,11 @@ export function buildProviders(ctx: Ctx): ProvidersView {
         };
       });
     const worstModel = perModel.reduce<(typeof perModel)[number] | null>((a, b) => (!a || SEVERITY[b.verdict] > SEVERITY[a.verdict] ? b : a), null);
-    const breaks = violations(models, fixed, new Set([...withBan].filter((p) => !fixed.has(p))), k).map((v) => v.slug);
+    const breaks = violations(models, without, new Set([provider]), k).map((v) => v.slug);
     return {
       provider,
       name: names.get(provider) ?? provider,
-      ban: banStatus(provider, ctx.bans, current, desired, settings),
-      inTarget: target.has(provider),
+      ban: banStatus(provider, ctx.bans, current, desired),
       models: perModel,
       worst: worstModel && worstModel.reasons.length ? `${worstModel.reasons[0]} (${worstModel.name})` : null,
       effect: blocked ? null : banned - base,
@@ -862,7 +830,6 @@ export function buildProviders(ctx: Ctx): ProvidersView {
       desired: des,
       added: des.filter((p) => !current.has(p)),
       removed: cur.filter((p) => !desired.has(p)),
-      violations: violations(models, fixed, new Set(des.filter((p) => !fixed.has(p))), k),
     },
   };
 }

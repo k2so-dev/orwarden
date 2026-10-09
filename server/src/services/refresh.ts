@@ -1,15 +1,10 @@
 import { sendAlert } from "../core/alert.ts";
 import { classifyAll } from "../core/classify.ts";
 import { collect } from "../core/collect.ts";
-import { baselineOf, objective } from "../core/cost.ts";
-import { applyHysteresis, autoSet } from "../core/hysteresis.ts";
 import { HttpError, type OpenRouterApi } from "../core/openrouter.ts";
-import { banSaving, optimize } from "../core/optimizer.ts";
-import { preflight } from "../core/preflight.ts";
-import type { Decision } from "../db.ts";
 import { changeLine, isSignificant, priceChanges } from "../core/changes.ts";
-import { allowedProviders, changeProfiles, fixedBans, resolveQuery, type AppSnapshot } from "./analysis.ts";
-import { applyBans, releaseAuto, sorted, type ApplyResult } from "./bans.ts";
+import { changeProfiles, resolveQuery, type AppSnapshot } from "./analysis.ts";
+import { sorted } from "./bans.ts";
 import { syncPresets, type SyncResult } from "./presets.ts";
 import type { Runtime } from "./state.ts";
 
@@ -17,8 +12,6 @@ export type RefreshResult = {
   takenAt: string;
   models: number;
   skipped: string[];
-  decisions: Decision[];
-  applied: ApplyResult | null;
   presets: SyncResult[];
   prices: string[];
 };
@@ -50,69 +43,13 @@ export async function takeSnapshot(client: OpenRouterApi, rt: Runtime): Promise<
   };
 }
 
-function hysteresisStep(rt: Runtime, snapshot: AppSnapshot): Decision[] {
-  const settings = rt.settings();
-  const inputs = rt.banInputs();
-  const fixed = fixedBans(inputs);
-  const allowed = allowedProviders(inputs);
-  const models = classifyAll(snapshot.models, settings);
-  const opt = optimize(models, fixed, settings, allowed);
-  const currentAuto = new Set([...autoSet(inputs.states)].filter((p) => !allowed.has(p)));
-  const banned = new Set([...fixed, ...currentAuto]);
-  const baseline = baselineOf(models, fixed);
-  const cache = new Map<string, number>();
-  const priority = (p: string) => {
-    if (!cache.has(p)) cache.set(p, banSaving(models, banned, p, baseline));
-    return cache.get(p)!;
-  };
-  const hy = applyHysteresis(inputs.states, opt.target, priority, settings);
-  const pre = preflight(models, fixed, autoSet(hy.states), hy.changes, settings.optimizer.minEndpointsPerModel);
-  releaseAuto(hy.states, pre.reverted.map((r) => r.provider));
-  rt.store.saveStates(hy.states);
-  const pct = (p: string) => {
-    const base = objective(models, banned, baseline);
-    return base > 0 ? priority(p) / base : null;
-  };
-  const { banAfterRuns, unbanAfterRuns } = settings.optimizer.hysteresis;
-  const worst = (p: string) => {
-    const eps = models.flatMap((m) => m.endpoints.filter((e) => e.provider === p));
-    const bad = eps.find((e) => e.cls === "hard-bad") ?? eps.find((e) => e.cls === "outlier");
-    return bad ? `${bad.cls} ${bad.reasons[0] ?? ""}`.trim() : "cost";
-  };
-  return [
-    ...hy.changes
-      .filter((c) => !pre.reverted.some((r) => r.provider === c.provider))
-      .map((c) => ({
-        provider: c.provider,
-        action: c.action,
-        reason: c.action === "ban" ? `${worst(c.provider)} · ${banAfterRuns} of ${banAfterRuns} runs` : `recovered · ${unbanAfterRuns} of ${unbanAfterRuns} runs`,
-        delta: pct(c.provider),
-      })),
-    ...hy.pending.map((p) => ({
-      provider: p.provider,
-      action: `pending-${p.action}`,
-      reason: p.capped ? "capped by maxChangesPerRun" : `${p.streak}/${p.needed} runs`,
-      delta: pct(p.provider),
-    })),
-  ];
-}
-
 const MAX_PRICE_LINES = 10;
 
-function alertText(snapshot: AppSnapshot, applied: ApplyResult | null, decisions: Decision[], presets: SyncResult[], prices: string[] = []): string | null {
+function alertText(snapshot: AppSnapshot, presets: SyncResult[], prices: string[] = []): string | null {
   const lines: string[] = [];
   if (prices.length > 0) {
     lines.push("Price changes:", ...prices.slice(0, MAX_PRICE_LINES).map((l) => `  ${l}`));
     if (prices.length > MAX_PRICE_LINES) lines.push(`  and ${prices.length - MAX_PRICE_LINES} more`);
-  }
-  if (applied?.patched) {
-    lines.push(`Guardrail updated: + ${applied.added.join(", ") || "-"} / - ${applied.removed.join(", ") || "-"}`);
-  }
-  for (const r of applied?.reverted ?? []) lines.push(`Reverted ban ${r.provider}: ${r.slug} would keep ${r.admissible}/${r.required}`);
-  for (const v of applied?.unresolved ?? []) lines.push(`${v.slug} has ${v.admissible}/${v.required} good endpoints`);
-  if (!applied) {
-    const changes = decisions.filter((d) => d.action === "ban" || d.action === "unban");
-    if (changes.length > 0) lines.push(`Dry-run: ${changes.map((d) => `${d.action} ${d.provider}`).join(", ")}`);
   }
   const failed = presets.filter((p) => p.status === "failed");
   const synced = presets.filter((p) => p.status === "synced");
@@ -150,36 +87,25 @@ export async function refresh(rt: Runtime, scheduled = false): Promise<RefreshRe
       rt.store.setValue("policies_imported", true);
     }
 
-    let decisions: Decision[] = [];
-    let applied: ApplyResult | null = null;
     let presets: SyncResult[] = [];
     if (scheduled) {
-      decisions = hysteresisStep(rt, snapshot);
-      if (settings.mode === "apply") {
-        applied = await applyBans(rt, { kind: "scheduled", force: true, decisions });
-      }
       presets = await syncPresets(rt, "auto", resolveQuery(settings), settings.mode === "dry-run");
     }
-    if (!applied) {
-      const current = sorted((snapshot.guardrail.ignored_providers ?? []).map((p) => p.toLowerCase()));
-      rt.store.saveRun(
-        {
-          startedAt,
-          kind: scheduled ? "scheduled" : "refresh",
-          mode: settings.mode,
-          status: "ok",
-          ignoredBefore: current,
-          ignoredAfter: current,
-          patched: false,
-          error: null,
-        },
-        decisions,
-      );
-    }
+    const current = sorted((snapshot.guardrail.ignored_providers ?? []).map((p) => p.toLowerCase()));
+    rt.store.saveRun({
+      startedAt,
+      kind: scheduled ? "scheduled" : "refresh",
+      mode: settings.mode,
+      status: "ok",
+      ignoredBefore: current,
+      ignoredAfter: current,
+      patched: false,
+      error: null,
+    });
     rt.lastError = null;
-    const text = scheduled ? alertText(snapshot, applied, decisions, presets, priceLines) : priceLines.length > 0 ? alertText(snapshot, null, [], [], priceLines) : null;
+    const text = scheduled ? alertText(snapshot, presets, priceLines) : priceLines.length > 0 ? alertText(snapshot, [], priceLines) : null;
     if (text) await alert(text);
-    return { takenAt: snapshot.takenAt, models: snapshot.models.length, skipped: snapshot.skipped, decisions, applied, presets, prices: priceLines };
+    return { takenAt: snapshot.takenAt, models: snapshot.models.length, skipped: snapshot.skipped, presets, prices: priceLines };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     rt.lastError = { at: startedAt, message, status: err instanceof HttpError ? err.status : null };
