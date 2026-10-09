@@ -73,6 +73,15 @@ describe("preset membership", () => {
     expect(pick({}, 0.5).sort()).toEqual(["a/fp8", "b/fp8", "c/fp8"]);
   });
 
+  test("fills slots dropped by the premium with the next endpoints that fit", () => {
+    const wide = model(settings, "vendor/wide", 1, [ep("a/fp8", 1, 2, 0.1), ep("b/fp8", 1.05, 2, 0.105), ep("c/fp8", 3, 2, 0.3), ep("d/fp8", 1.1, 2, 0.11)]);
+    const base = scoreEndpoints(wide.endpoints, profile, wide.endpoints, settings.scoring);
+    const overall: Record<string, number> = { "c/fp8": 90, "a/fp8": 80, "b/fp8": 70, "d/fp8": 60 };
+    const ranked = new Map(wide.endpoints.map((e) => [e, { ...base.get(e)!, overall: overall[e.tag]! }]));
+    const tags = rankForPreset(wide, profile, new Set(), ranked, undefined, 2, false, "score", 0.15).map((e) => e.tag);
+    expect(tags).toEqual(["a/fp8", "b/fp8"]);
+  });
+
   test("pinned and hand-picked endpoints bypass the premium", () => {
     expect(pick({ pinned: ["c/fp8"] })).toEqual(["c/fp8", "a/fp8", "b/fp8"]);
     expect(pick({ picked: ["a/fp8", "c/fp8"] })).toEqual(["a/fp8", "c/fp8"]);

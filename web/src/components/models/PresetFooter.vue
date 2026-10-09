@@ -19,12 +19,20 @@ const jsonOpen = ref(false);
 const json = computed(() => JSON.stringify(props.preset.config, null, 2));
 const min = computed(() => props.preset.policy.minQuantization);
 const held = computed(() => props.preset.ranked.filter((e) => e.held).length);
+const left = computed(() => {
+  const p = props.preset;
+  const listed = p.ranked.length - held.value;
+  const rest = p.eligibleCount - listed;
+  if (p.picked || listed >= topN.value) return null;
+  return rest > 0 ? `${rest} more eligible cost over +${Math.round(premium.value * 100)}%` : `only ${p.eligibleCount} eligible`;
+});
 const line = computed(() => {
   const p = props.preset;
   const parts = [
     `${p.ranked.length} endpoint${p.ranked.length === 1 ? "" : "s"}`,
     p.picked ? "ticked endpoints" : p.rankBy === "cost" ? "cheapest effective" : "top by score",
     ...(p.picked ? [] : [`within +${Math.round(premium.value * 100)}% of cheapest`]),
+    ...(left.value ? [left.value] : []),
     "no fixed order (cache-friendly)",
     ...(held.value > 0 ? [`${held.value} held while the cache is warm`] : []),
     ...(p.policy.fallbacks ? ["fallbacks within list"] : []),
@@ -40,6 +48,13 @@ const saving = computed(() => {
   return `${signedMoney(c.saving)} / ${props.preset.horizonDays}d (${signedPct(c.savingPct)}) vs default`;
 });
 const estimate = computed(() => props.preset.estimate);
+const estimateLabel = computed(() => {
+  const e = estimate.value;
+  if (!e) return "";
+  if (e.low < e.value * 0.99) return `range ${money(e.low)}–${money(e.high)}`;
+  if (e.high > e.value * 1.01) return `up to ${money(e.high)}`;
+  return "single price";
+});
 const estimateTip = computed(() => (estimate.value ? riskLines(estimate.value.risks) : []));
 const savingTone = computed(() => ((props.preset.cost.saving ?? 0) <= 0 ? "text-ok" : "text-bad"));
 const primary = computed(() => !(props.preset.status === "up-to-date" && !dryRun.value && props.preset.syncedAt));
@@ -73,10 +88,10 @@ async function saveRename() {
       </div>
       <span v-if="saving && !blocked" :class="['tnum text-[12.5px] font-semibold', savingTone]">{{ saving }}</span>
       <Tip v-if="estimate && !blocked" :title="`Estimate · ${CONFIDENCE[estimate.confidence].text}`" :lines="estimateTip" class="tnum text-xs text-muted-foreground">
-        range {{ money(estimate.low) }}–{{ money(estimate.high) }} · {{ estimate.confidence }}
+        {{ estimateLabel }} · {{ estimate.confidence }}
       </Tip>
       <div class="ml-auto flex flex-wrap items-center gap-1.5">
-        <button v-if="preset.picked" type="button" class="inline-flex h-[30px] items-center rounded-lg px-3 text-[12.5px] font-medium hover:bg-accent" @click="resetPick(preset.model)">Reset to top {{ topN }}</button>
+        <button v-if="preset.picked" type="button" class="inline-flex h-[30px] items-center rounded-lg px-3 text-[12.5px] font-medium hover:bg-accent" :title="`Drop the ticks and list up to ${topN} endpoints within +${Math.round(premium * 100)}% of the cheapest`" @click="resetPick(preset.model)">Reset to auto</button>
         <div class="flex items-center gap-1.5 px-1.5" :title="dryRun ? 'Dry-run is on: scheduled refreshes only plan the write' : 'Scheduled refreshes rewrite this preset whenever its ranking changes'">
           <Toggle :model-value="preset.autoSync" label="Auto-sync" @update:model-value="patchPreset(preset.model, { autoSync: $event })" />
           <span class="text-[12.5px]">Auto-sync</span>

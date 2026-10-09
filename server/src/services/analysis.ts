@@ -281,11 +281,13 @@ export function rankForPreset(
         a.tag.localeCompare(b.tag),
     );
   const seen = new Set<string>();
-  const top = [...pinned, ...rest].filter((e) => !seen.has(e.tag) && Boolean(seen.add(e.tag))).slice(0, topN);
+  const ordered = [...pinned, ...rest].filter((e) => !seen.has(e.tag) && Boolean(seen.add(e.tag)));
+  const top = ordered.slice(0, topN);
   const free = top.filter((e) => !pinned.includes(e));
   if (free.length === 0) return top;
   const ceiling = Math.min(...free.map((e) => effectivePerM(e, profile))) * (1 + maxPremium);
-  return top.filter((e) => pinned.includes(e) || effectivePerM(e, profile) <= ceiling * (1 + 1e-9));
+  const fits = (e: ClassifiedEndpoint) => pinned.includes(e) || effectivePerM(e, profile) <= ceiling * (1 + 1e-9);
+  return ordered.filter(fits).slice(0, topN);
 }
 
 export function effectivePerM(e: ClassifiedEndpoint, profile: { h: number; r: number }): number {
