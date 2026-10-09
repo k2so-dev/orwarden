@@ -1,6 +1,6 @@
 # orwarden
 
-Self-hosted dashboard that keeps OpenRouter routing honest. It scores every provider endpoint of the models you use by price, speed and reliability, keeps a global provider ban list in the workspace default guardrail, and builds per-model presets (`@preset/<slug>`) that restrict each model to its most efficient providers without breaking the prompt cache mid-conversation.
+Self-hosted dashboard that keeps OpenRouter routing honest. It scores every provider endpoint of the models you use by price, speed and reliability, lets you keep a global provider ban list in the workspace default guardrail, and builds per-model presets (`@preset/<slug>`) that restrict each model to its most efficient providers without breaking the prompt cache mid-conversation.
 
 ![orwarden dashboard](docs/screenshot.png)
 
@@ -15,7 +15,30 @@ Upgrading an install that ran as `rerouter`: run `docker compose up -d --remove-
 
 Open `http://127.0.0.1:3000`, log in with the password and paste an OpenRouter management key. The key is stored encrypted (AES-GCM, key derived from the dashboard password) in `data/orwarden.db` (an existing `data/rerouter.db` keeps being used). `OPENROUTER_MANAGEMENT_KEY` in `.env` is an optional fallback.
 
-The server refreshes data on `REFRESH_CRON` (settings can override it). Scheduled refreshes run the ban optimizer with hysteresis; in `apply` mode they also patch the guardrail and sync presets marked as auto-sync. Manual actions in the dashboard always apply immediately.
+The server refreshes data on `REFRESH_CRON` (settings can override it). A scheduled refresh collects data, records history, sends alerts and, for presets marked as auto-sync, syncs them (planned only in `dry-run` mode, written in `apply` mode). It never changes the guardrail: bans change only when you press *Apply to guardrail*. The *Dry-run / Apply* switch in the header decides whether write buttons only preview (default) or write to OpenRouter.
+
+## Architecture
+
+One Bun process serves the Hono API under `/api` and the built Vue app. State lives in SQLite (`data/orwarden.db`, WAL mode).
+
+```
+OpenRouter ──► refresh ──► snapshot (memory) + history tables
+                              │
+ saved settings + overrides ──┤
+                              ▼
+          classify → score → presets / providers / changes views
+                              │
+          dashboard  ◄────────┘      writes: guardrail, presets (explicit or auto-sync)
+```
+
+- **Refresh cycle** (`server/src/services/refresh.ts`): resolve the workspace and its default guardrail, read activity and the model catalog, collect every tracked model with all endpoints, store hourly history and price events, import the guardrail bans as policies on the first run, compute price-change alerts, then, on a scheduled run only, sync auto-sync presets. A run is skipped while another one is in progress (`Runtime.exclusive`).
+- **Core** (`server/src/core`): pure functions without I/O. `classify` assigns verdicts, `cost` holds the price formulas, `stability` and `estimate` score history and build the range and risks, `hold` decides which dropped providers stay, `forecast` prices default routing, `changes` and `coverage` serve the change feed and the ban checks.
+- **Services** (`server/src/services`): `analysis` builds every view from the snapshot and saved settings, `presets` generates, compares and writes presets, `bans` writes and rolls back the guardrail, `state` holds the runtime (settings, snapshot, scheduler, lock).
+- **Settings** are one validated JSON document in the `kv` table. Per-model overrides live in the `presets` table and are applied per model on top of the global settings.
+- **Tables**: `kv` (settings), `secrets` (encrypted key), `snapshots`, `endpoint_history` and `endpoint_state` (30-day history), `price_events`, `provider_policy` (ban draft), `runs` and `decisions` (guardrail writes), `presets` (per-model settings and sync state), `preset_holds`.
+- **Frontend** (`web/src`): views per tab, one `shallowRef` store per API payload, typed RPC client. Tables use plain Vapor components; shadcn-vue is limited to dialogs, popovers and other chrome.
+
+**What can change OpenRouter.** Only these actions write: *Apply to guardrail* and *Roll back* (guardrail), *Sync* and auto-sync (presets, `apply` mode only). Everything else reads.
 
 ## How it works
 
@@ -33,7 +56,7 @@ orwarden answers one question per model: which providers should serve it, so you
 
   The workload bar at the top of the dashboard chooses the mode. *Actual* takes all three numbers from your activity (tokens over the window divided by the number of days; models without traffic fall back to `h = 0.5`, `r = 0.2` and the default volume). Moving the *Cache* or *Out/in* slider switches to a described workload with fixed `h`, `r` and a volume you choose (default 1M input tokens per day for every model). The label next to the sliders (Agent, RAG, Chat, Reasoning) is only a hint derived from `h` and `r`.
 
-  The workload, the quality filters (min quantization, min uptime, tool calling, ZDR) and the score weights are **saved immediately** (with an Undo toast) and are the single rule set: the tables, presets, auto-sync and scheduled bans all use them. Only the period (1d / 7d / 30d) and *Hide banned providers* stay in the browser.
+  The workload, the quality filters (min quantization, min uptime, tool calling, ZDR) and the score weights are **saved immediately** (with an Undo toast) and are the single rule set: the tables, presets and auto-sync all use them. Only the period (1d / 7d / 30d) and *Hide banned providers* stay in the browser.
 
 ### Price of an endpoint
 
@@ -45,7 +68,7 @@ C = (1 − h) · p_in + h · p_cache + r · p_out
 
 Prices are per 1M tokens, so `C` already includes the cached part of the input and the output that the input produces. Money over a period is `C × tokens per day × days / 1M`.
 
-The **effective price** divides by uptime, because a failed request is retried elsewhere: `C_eff = C / uptime`. Endpoints slower than `minTps` (off by default) are multiplied by `slowPenalty` (`1.2`) in the ban optimizer.
+The **effective price** divides by uptime, because a failed request is retried elsewhere: `C_eff = C / uptime`. Endpoints slower than `minTps` (off by default) are multiplied by `slowPenalty` (`1.2`).
 
 ### Verdicts
 
@@ -159,16 +182,15 @@ Each refresh, manual or scheduled, sends the significant changes it found to the
 
 ### Global bans
 
-The ban optimizer writes the guardrail's `ignored_providers`:
+Global bans are the guardrail's `ignored_providers`: a banned provider is skipped for every request in the workspace, with or without a preset. orwarden never bans on its own. You decide on the Providers tab:
 
-- **Objective.** Each model's spend is the usage-weighted average of `C_eff × penalty`, with `r` raised to at least `0.5` so that output-heavy outliers always count. The penalties are `×3` for hard-bad, `×5` for an output outlier and `×1.5` for a cache outlier. The averaging uses the default routing weights.
-- **Search.** A greedy search adds or removes one provider at a time while that lowers the objective by at least `1%`, for at most `20` moves.
-- **Constraint.** A model may never drop below `2` good endpoints, or below what it has if it has fewer. No model may lose all of its endpoints.
-- **Low-quant providers.** Providers that only serve below-minimum quantization are banned first (`filters.banLowQuantProviders`, on by default).
-- **Manual policies.** *Ban* and *Allow* on the Providers tab override the optimizer.
-- **Hysteresis.** Scheduled runs ban a provider after it was a candidate `2` runs in a row and unban after `3` clean runs. They change at most `3` providers per run.
+- **Draft.** The *Ban* switch of a provider edits a draft, stored as provider policies. The *Pending changes* bar shows the difference from the guardrail (`+` to ban, `−` to unban).
+- **Preview and apply.** *Preview* shows the diff and what it does to the spend of all tracked models. *Apply to guardrail* writes it. In `dry-run` mode nothing is written. *Discard* resets the draft to the current guardrail.
+- **History and rollback.** Every write is stored with the list before and after it. *Roll back* restores the list from before a change.
+- **Effect column.** For every provider the table shows how the cost of all tracked models changes if it is banned, using default routing weights and the saved workload. A provider "blocks" a model when banning it would leave that model with no endpoint. The *Min good providers per model* setting (`2`) marks models that would keep fewer good endpoints than that.
+- **Cache.** A ban moves conversations off that provider and they re-read their context at the full input price, so prefer presets for per-model choices and keep bans for providers you never want.
 
-The Providers tab shows, for every provider, how the cost of all tracked models changes if it is banned. A provider "blocks" a model when banning it would leave that model with no endpoint.
+Providers listed in the guardrail but missing from the draft show as *unban pending*. An upgrade from a version that banned providers automatically removes its automatic bans from the draft this way; the guardrail itself changes only when you apply.
 
 ### Which options save money
 
@@ -211,9 +233,10 @@ All routes live under `/api` and require a session cookie except `/api/auth/*`.
 | GET | `/trend?model=` | Price events and daily uptime for the last 30 days |
 | GET | `/changes` | Price changes of tracked models over the last 30 days |
 | GET | `/providers` | Provider table with ban effects |
-| PUT | `/providers/:slug/policy` | `ban`, `allow` or `null` |
-| POST | `/bans/apply`, `/bans/rollback` | Write the guardrail |
-| GET | `/bans/history` | Runs and decisions |
+| PUT | `/providers/:slug/policy` | `ban` or `null` (edits the draft) |
+| POST | `/bans/apply` | Write the draft to the guardrail (`{ dryRun: true }` returns the diff and cost change) |
+| POST | `/bans/discard`, `/bans/rollback` | Reset the draft; restore an earlier list |
+| GET | `/bans/history` | Guardrail writes and rollbacks |
 | GET | `/presets` | Preset plans and remote status |
 | PUT | `/presets/settings` | Slug, auto-sync, picked (hand-picked endpoints, `null` resets) |
 | POST | `/presets/sync` | Create or update presets on OpenRouter |
