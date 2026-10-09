@@ -140,6 +140,12 @@ This is the "With presets" figure; the real cost is at most this. It is compared
 
 Confidence is low when any risk is bad (a price swing of 25% or more), medium when any risk is a warning or data is thin, and high otherwise. The summary uses the risks of models that make up at least 5% of the preset spend.
 
+### Price changes
+
+The *Changes* tab lists every price change, new provider and removed provider of your tracked models over the last 30 days, newest first. Input and output show the old and new price; *At workload* is the change of the blended price `C` at the saved workload. By default only significant changes are shown: a blended or output move of `10%` or more, a quantization change, or a provider that appeared or disappeared.
+
+Each refresh, manual or scheduled, sends the significant changes it found to the configured alert channels.
+
 ### Global bans
 
 The ban optimizer writes the guardrail's `ignored_providers`:
@@ -191,6 +197,8 @@ All routes live under `/api` and require a session cookie except `/api/auth/*`.
 | GET | `/catalog?q=` | Model search for the watchlist |
 | GET | `/overview` | Models with endpoint scores, costs and scenarios |
 | GET | `/history?model=` | Price and uptime history |
+| GET | `/trend?model=` | Price events and daily uptime for the last 30 days |
+| GET | `/changes` | Price changes of tracked models over the last 30 days |
 | GET | `/providers` | Provider table with ban effects |
 | PUT | `/providers/:slug/policy` | `ban`, `allow` or `null` |
 | POST | `/bans/apply`, `/bans/rollback` | Write the guardrail |

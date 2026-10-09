@@ -9,10 +9,11 @@ import { clock } from "@/stores/ui";
 import { cn } from "@/lib/utils";
 import { presetSummary, syncAll, syncBusy } from "@/lib/presetActions";
 import { go, tab, TABS } from "@/stores/nav";
-import { dryRun, hasData, loading, loadError, overview, presetsFailed, providers, refreshing, refreshNow, status, writeBlocked } from "@/stores/data";
+import { changes, dryRun, hasData, loading, loadError, overview, presetsFailed, providers, refreshing, refreshNow, status, writeBlocked } from "@/stores/data";
 import { settingsOpen } from "@/stores/ui";
 import ModelsTab from "@/views/ModelsTab.vue";
 import ProvidersTab from "@/views/ProvidersTab.vue";
+import ChangesTab from "@/views/ChangesTab.vue";
 
 const noKey = computed(() => status.value !== null && status.value.health === "no-key");
 const ready = computed(() => overview.value !== null);
@@ -26,6 +27,7 @@ const noData = computed(() => !skeleton.value && !ready.value);
 const counts = computed(() => ({
   models: overview.value?.models.length ?? 0,
   providers: providers.value?.rows.length ?? 0,
+  changes: changes.value?.changes.filter((c) => c.significant).length ?? 0,
 }));
 const pendingBans = computed(() => (providers.value?.pending.added.length ?? 0) + (providers.value?.pending.removed.length ?? 0) > 0);
 
@@ -117,7 +119,8 @@ const alertBox = "flex items-start gap-3 rounded-[10px] border border-bad bg-bad
         </div>
         <template v-else>
           <ModelsTab v-if="tab === 'models'" />
-          <ProvidersTab v-else />
+          <ProvidersTab v-else-if="tab === 'providers'" />
+          <ChangesTab v-else />
         </template>
       </main>
     </template>

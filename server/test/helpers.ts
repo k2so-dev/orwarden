@@ -110,7 +110,7 @@ export function mockClient(opts: {
       return preset;
     },
   };
-  return { client, guardrail, calls, presets };
+  return { client, guardrail, calls, presets, endpoints };
 }
 
 export const NOW = () => new Date("2026-10-07T12:00:00Z");

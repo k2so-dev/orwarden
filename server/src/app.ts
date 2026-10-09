@@ -5,7 +5,7 @@ import { z } from "zod";
 import { LoginLimiter, clientIp, endSession, passwordMatches, requireSession, sessionExpiry, startSession, type AuthOptions } from "./auth.ts";
 import { sendAlert } from "./core/alert.ts";
 import { HttpError } from "./core/openrouter.ts";
-import { buildOverview, buildProviders, resolveQuery, spendChange } from "./services/analysis.ts";
+import { buildChanges, buildOverview, buildProviders, resolveQuery, spendChange } from "./services/analysis.ts";
 import { applyBans, banHistory, discardDrafts, rollback } from "./services/bans.ts";
 import { listPresets, pinLegacySlugs, syncPresets, updatePresetSettings } from "./services/presets.ts";
 import { refresh } from "./services/refresh.ts";
@@ -206,6 +206,7 @@ export function createApp(rt: Runtime) {
       const since = new Date(rt.now().getTime() - HISTORY_DAYS * 86_400_000).toISOString();
       return c.json({ days: HISTORY_DAYS, events: rt.store.priceEvents("", model), daily: rt.store.dailyHistory(model, since) });
     })
+    .get("/changes", (c) => c.json(buildChanges(rt.requireSnapshot(), rt.settings(), rt.store.priceEvents(""))))
     .get("/providers", zValidator("query", ViewQuerySchema), (c) =>
       c.json(
         buildProviders({

@@ -5,6 +5,7 @@ import {
   RequestError,
   unwrap,
   type BanHistory,
+  type ChangesView,
   type Overview,
   type PresetView,
   type ProvidersView,
@@ -22,6 +23,7 @@ export const overview = shallowRef<Overview | null>(null);
 export const providers = shallowRef<ProvidersView | null>(null);
 export const presets = shallowRef<PresetView[] | null>(null);
 export const presetsFailed = ref(false);
+export const changes = shallowRef<ChangesView | null>(null);
 export const history = shallowRef<BanHistory>([]);
 export const loading = ref(false);
 export const refreshing = ref(false);
@@ -89,11 +91,12 @@ export async function loadViews(): Promise<void> {
   if (!hasData.value) return;
   const seq = ++viewsSeq;
   const query = viewQuery.value;
-  const [o, p, pr, h] = await Promise.all([
+  const [o, p, pr, h, ch] = await Promise.all([
     guard(() => unwrap(client.overview.$get({ query }))),
     guard(() => unwrap(client.providers.$get({ query }))),
     guard(() => unwrap(client.presets.$get({ query: { ...query, fresh: "false" } }))),
     guard(() => unwrap(client.bans.history.$get({ query: { limit: "30" } }))),
+    guard(() => unwrap(client.changes.$get())),
   ]);
   if (seq !== viewsSeq) return;
   if (o && o.takenAt !== overview.value?.takenAt) trendCache.value = new Map();
@@ -102,6 +105,7 @@ export async function loadViews(): Promise<void> {
   if (pr) presets.value = pr;
   presetsFailed.value = pr === null;
   if (h) history.value = h;
+  if (ch) changes.value = ch;
 }
 
 export async function loadAll(): Promise<void> {

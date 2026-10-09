@@ -7,7 +7,8 @@ import { HttpError, type OpenRouterApi } from "../core/openrouter.ts";
 import { banSaving, optimize } from "../core/optimizer.ts";
 import { preflight } from "../core/preflight.ts";
 import type { Decision } from "../db.ts";
-import { allowedProviders, fixedBans, resolveQuery, type AppSnapshot } from "./analysis.ts";
+import { changeLine, isSignificant, priceChanges } from "../core/changes.ts";
+import { allowedProviders, changeProfiles, fixedBans, resolveQuery, type AppSnapshot } from "./analysis.ts";
 import { applyBans, releaseAuto, sorted, type ApplyResult } from "./bans.ts";
 import { syncPresets, type SyncResult } from "./presets.ts";
 import type { Runtime } from "./state.ts";
@@ -19,6 +20,7 @@ export type RefreshResult = {
   decisions: Decision[];
   applied: ApplyResult | null;
   presets: SyncResult[];
+  prices: string[];
 };
 
 export async function takeSnapshot(client: OpenRouterApi, rt: Runtime): Promise<AppSnapshot> {
@@ -95,8 +97,14 @@ function hysteresisStep(rt: Runtime, snapshot: AppSnapshot): Decision[] {
   ];
 }
 
-function alertText(snapshot: AppSnapshot, applied: ApplyResult | null, decisions: Decision[], presets: SyncResult[]): string | null {
+const MAX_PRICE_LINES = 10;
+
+function alertText(snapshot: AppSnapshot, applied: ApplyResult | null, decisions: Decision[], presets: SyncResult[], prices: string[] = []): string | null {
   const lines: string[] = [];
+  if (prices.length > 0) {
+    lines.push("Price changes:", ...prices.slice(0, MAX_PRICE_LINES).map((l) => `  ${l}`));
+    if (prices.length > MAX_PRICE_LINES) lines.push(`  and ${prices.length - MAX_PRICE_LINES} more`);
+  }
   if (applied?.patched) {
     lines.push(`Guardrail updated: + ${applied.added.join(", ") || "-"} / - ${applied.removed.join(", ") || "-"}`);
   }
@@ -133,6 +141,9 @@ export async function refresh(rt: Runtime, scheduled = false): Promise<RefreshRe
     );
     rt.store.recordPrices(snapshot.takenAt, snapshot.models);
     rt.invalidateHistory();
+    const priceLines = priceChanges(rt.store.priceEvents(""), changeProfiles(snapshot, settings))
+      .filter((c) => c.ts === snapshot.takenAt && isSignificant(c))
+      .map(changeLine);
     if (!rt.store.getValue<boolean>("policies_imported")) {
       const current = sorted((snapshot.guardrail.ignored_providers ?? []).map((p) => p.toLowerCase()));
       rt.store.replaceBanPolicies(current, startedAt);
@@ -166,11 +177,9 @@ export async function refresh(rt: Runtime, scheduled = false): Promise<RefreshRe
       );
     }
     rt.lastError = null;
-    if (scheduled) {
-      const text = alertText(snapshot, applied, decisions, presets);
-      if (text) await alert(text);
-    }
-    return { takenAt: snapshot.takenAt, models: snapshot.models.length, skipped: snapshot.skipped, decisions, applied, presets };
+    const text = scheduled ? alertText(snapshot, applied, decisions, presets, priceLines) : priceLines.length > 0 ? alertText(snapshot, null, [], [], priceLines) : null;
+    if (text) await alert(text);
+    return { takenAt: snapshot.takenAt, models: snapshot.models.length, skipped: snapshot.skipped, decisions, applied, presets, prices: priceLines };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     rt.lastError = { at: startedAt, message, status: err instanceof HttpError ? err.status : null };

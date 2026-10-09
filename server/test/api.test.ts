@@ -86,6 +86,22 @@ describe("api flow", () => {
     expect(res.body.error).toBe("no-data");
   });
 
+  test("a price change between refreshes is reported, listed and alerted", async () => {
+    await ctx.call("/api/refresh", { method: "POST", body: {} });
+    const raw = structuredClone(ctx.mock.endpoints[DEEPSEEK]!);
+    const target = raw[0]!;
+    target.pricing.completion = String(Number(target.pricing.completion) * 1.5);
+    ctx.mock.endpoints[DEEPSEEK] = raw;
+    const run = await ctx.call("/api/refresh", { method: "POST", body: {} });
+    expect(run.body.prices).toHaveLength(1);
+    expect(run.body.prices[0]).toContain(target.tag);
+    const { body } = await ctx.call("/api/changes");
+    expect(body.changes).toHaveLength(1);
+    expect(body.changes[0].kind).toBe("changed");
+    expect(body.changes[0].outPct).toBeCloseTo(0.5, 9);
+    expect(body.changes[0].significant).toBe(true);
+  });
+
   test("refresh builds the overview and imports current bans as policies", async () => {
     expect((await ctx.call("/api/refresh", { method: "POST", body: {} })).status).toBe(200);
     expect(ctx.store.policies().get("relace")).toBe("ban");

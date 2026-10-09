@@ -3,12 +3,13 @@ import { classifyModel, modelMinQuantization, modelMinQuantRank, quantRank } fro
 import { routingWeight, unitCost } from "../core/cost.ts";
 import { pricePerMillion } from "../core/forecast.ts";
 import type { ProviderState } from "../core/hysteresis.ts";
+import { CHANGE_THRESHOLD, isSignificant, priceChanges, type PriceChange } from "../core/changes.ts";
 import { calibrate, confidenceOf, presetEstimate, workloadDrift, type Calibration, type Confidence, type Estimate } from "../core/estimate.ts";
 import { endpointStability, NEUTRAL_STABILITY, type HistoryInputs, type Stability } from "../core/stability.ts";
 import type { Guardrail } from "../core/openrouter.ts";
 import { admissibleCount, optimize, totalCount, violations, type Violation } from "../core/optimizer.ts";
 import type { ClassifiedEndpoint, ClassifiedModel, Issue, ModelInput } from "../core/types.ts";
-import type { Policy, PresetSettings, RunRecord } from "../db.ts";
+import { HISTORY_DAYS, type Policy, type PresetSettings, type PriceEvent, type RunRecord } from "../db.ts";
 import { PRESET_SLUG_RE, type Settings } from "../settings.ts";
 
 export type AppSnapshot = {
@@ -1027,6 +1028,32 @@ function costChange(
     now += (b * p.inputPerDay * days) / 1_000_000;
   }
   return { before: was, after: now, blocked };
+}
+
+export type ChangeRow = PriceChange & { modelName: string; providerName: string; significant: boolean };
+export type ChangesView = { days: number; threshold: number; changes: ChangeRow[] };
+
+export function changeProfiles(snapshot: AppSnapshot, settings: Settings): (model: string) => { h: number; r: number } {
+  const q = savedQuery(settings);
+  const byModel = new Map(snapshot.models.map((m) => [m.slug, m]));
+  return (model) => {
+    const input = byModel.get(model);
+    return input ? resolveProfile(input, settings, q) : settings.defaultProfile;
+  };
+}
+
+export function buildChanges(snapshot: AppSnapshot, settings: Settings, events: readonly PriceEvent[]): ChangesView {
+  const byModel = new Map(snapshot.models.map((m) => [m.slug, m]));
+  const changes = priceChanges(events, changeProfiles(snapshot, settings)).map((c) => {
+    const input = byModel.get(c.model);
+    return {
+      ...c,
+      modelName: input?.name ?? c.model,
+      providerName: input?.endpoints.find((e) => e.tag === c.tag)?.providerName ?? c.tag.split("/")[0]!,
+      significant: isSignificant(c),
+    };
+  });
+  return { days: HISTORY_DAYS, threshold: CHANGE_THRESHOLD, changes };
 }
 
 export function spendChange(ctx: Ctx, before: ReadonlySet<string>, after: ReadonlySet<string>): { before: number; after: number; blocked: boolean } {
