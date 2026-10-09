@@ -135,6 +135,7 @@ This is the "With presets" figure; the real cost is at most this. It is compared
 | `fallback-cache` | a listed provider can fail and the request re-reads its cached context elsewhere | worst downtime × `h` × (`p_in` − `p_cache`) × volume |
 | `workload-drift` | the daily cache hit and output/input ratio of your traffic vary | cost at `h − σ`, `r + σ` minus the headline |
 | `default-model` | default routing is a model of OpenRouter's spread | nothing, it shows the range the default could have |
+| `calibration` | your real spend over the usage window differs by more than 5% from what the model predicts for the same traffic (the preset range when the preset was synced before the window, default routing otherwise) | headline × error, when the model underestimated |
 | `thin-data` | providers younger than 7 days, or no recent traffic | nothing, it lowers confidence |
 
 Confidence is low when any risk is bad (a price swing of 25% or more), medium when any risk is a warning or data is thin, and high otherwise. The summary uses the risks of models that make up at least 5% of the preset spend.

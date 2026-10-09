@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { confidenceOf, presetEstimate, workloadDrift, type EstimateInput } from "../src/core/estimate.ts";
+import { calibrate, confidenceOf, presetEstimate, workloadDrift, type EstimateInput } from "../src/core/estimate.ts";
 import { NEUTRAL_STABILITY, type Stability } from "../src/core/stability.ts";
 import { ep } from "./helpers.ts";
 
@@ -56,6 +56,28 @@ describe("preset estimate", () => {
     expect(confidenceOf([])).toBe("high");
     expect(confidenceOf([{ kind: "thin-data", level: "info", text: "", impactUsd: null }])).toBe("medium");
     expect(confidenceOf([{ kind: "routing", level: "info", text: "", impactUsd: null }])).toBe("high");
+  });
+});
+
+describe("calibration", () => {
+  test("measures the error outside the predicted range only", () => {
+    expect(calibrate(10, 8, 12, "preset", 7)!.error).toBe(0);
+    expect(calibrate(15, 8, 12, "preset", 7)!.error).toBeCloseTo(0.25, 9);
+    expect(calibrate(6, 8, 12, "preset", 7)!.error).toBeCloseTo(-0.25, 9);
+    expect(calibrate(0, 8, 12, "default", 7)).toBeNull();
+  });
+
+  test("an underestimate widens the high end", () => {
+    const calibration = calibrate(15, 12, 12, "default", 7);
+    const e = presetEstimate({ ...base, members: [member("a", 1)], calibration })!;
+    const risk = e.risks.find((r) => r.kind === "calibration")!;
+    expect(risk.level).toBe("warn");
+    expect(risk.text).toContain("above the default routing model");
+    expect(e.high).toBeCloseTo(1.25, 9);
+  });
+
+  test("small errors are not reported", () => {
+    expect(kinds({ ...base, members: [member("a", 1)], calibration: calibrate(12.4, 12, 12, "default", 7) })).toEqual([]);
   });
 });
 

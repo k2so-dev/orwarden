@@ -48,7 +48,11 @@ const estimate = computed(() => props.model.estimate);
 const estimateTip = computed(() => {
   const e = estimate.value;
   if (!e) return [];
-  return [{ text: `${money(e.value)} expected, from ${money(e.low)} to ${money(e.high)} over ${periodLabel(overview.value?.horizonDays ?? 7)} · ${CONFIDENCE[e.confidence].text}`, tone: "fg" as const }, ...riskLines(e.risks)];
+  const c = props.model.calibration;
+  const check = c && !e.risks.some((r) => r.kind === "calibration")
+    ? [{ text: `Check on the last ${c.days} days: spent ${money(c.actualUsd)}, ${c.basis === "preset" ? "preset" : "default routing"} model says ${c.lowUsd === c.predictedUsd ? money(c.predictedUsd) : `${money(c.lowUsd)}–${money(c.predictedUsd)}`}`, tone: "muted" as const }]
+    : [];
+  return [{ text: `${money(e.value)} expected, from ${money(e.low)} to ${money(e.high)} over ${periodLabel(overview.value?.horizonDays ?? 7)} · ${CONFIDENCE[e.confidence].text}`, tone: "fg" as const }, ...check, ...riskLines(e.risks)];
 });
 
 const COLUMN_ITEMS = [

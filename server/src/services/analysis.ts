@@ -3,7 +3,7 @@ import { classifyModel, modelMinQuantization, modelMinQuantRank, quantRank } fro
 import { routingWeight, unitCost } from "../core/cost.ts";
 import { pricePerMillion } from "../core/forecast.ts";
 import type { ProviderState } from "../core/hysteresis.ts";
-import { confidenceOf, presetEstimate, workloadDrift, type Confidence, type Estimate } from "../core/estimate.ts";
+import { calibrate, confidenceOf, presetEstimate, workloadDrift, type Calibration, type Confidence, type Estimate } from "../core/estimate.ts";
 import { endpointStability, NEUTRAL_STABILITY, type HistoryInputs, type Stability } from "../core/stability.ts";
 import type { Guardrail } from "../core/openrouter.ts";
 import { admissibleCount, optimize, totalCount, violations, type Violation } from "../core/optimizer.ts";
@@ -104,6 +104,7 @@ export type ModelView = {
   presetId: string | null;
   cost: CostTriple;
   estimate: Estimate | null;
+  calibration: Calibration | null;
   scenarios: ({ name: string; tools: boolean; h: number; r: number; inputPerDay: number } & CostTriple)[];
   endpoints: EndpointView[];
   warnings: Warning[];
@@ -502,7 +503,32 @@ function costs(model: ClassifiedModel, ranked: ClassifiedEndpoint[] | null, curr
   };
 }
 
-function modelEstimate(input: ModelInput, calc: ModelCalc, ranked: ClassifiedEndpoint[] | null, current: ReadonlySet<string>, profile: Profile, days: number): Estimate | null {
+function modelCalibration(input: ModelInput, calc: ModelCalc, ranked: ClassifiedEndpoint[] | null, current: ReadonlySet<string>, ctx: Ctx): Calibration | null {
+  if (input.source !== "usage" || input.inputTokens <= 0 || input.usageUsd <= 0) return null;
+  const { settings, snapshot } = ctx;
+  const days = settings.usageWindowDays;
+  const windowStart = new Date(Math.floor(Date.parse(snapshot.takenAt) / 86_400_000) * 86_400_000 - days * 86_400_000).toISOString();
+  const syncedAt = ctx.presets.get(input.slug)?.syncedAt ?? null;
+  const tools = settings.filters.requireTools;
+  const money = (perM: number) => (perM * input.inputTokens) / 1_000_000;
+  const members = ranked ? servable(ranked, tools) : [];
+  if (syncedAt && syncedAt <= windowStart && members.length > 0) {
+    const costs = members.map((e) => unitCost(e, input.h, input.r));
+    return calibrate(input.usageUsd, money(Math.min(...costs)), money(Math.max(...costs)), "preset", days);
+  }
+  const price = pricePerMillion(calc.model, current, input.h, input.r, tools, settings.optimizer.routingPrice).price;
+  return price === null ? null : calibrate(input.usageUsd, money(price), money(price), "default", days);
+}
+
+function modelEstimate(
+  input: ModelInput,
+  calc: ModelCalc,
+  ranked: ClassifiedEndpoint[] | null,
+  current: ReadonlySet<string>,
+  profile: Profile,
+  days: number,
+  calibration: Calibration | null = null,
+): Estimate | null {
   if (!ranked) return null;
   const members = servable(ranked, profile.tools).map((e) => ({ endpoint: e, stability: calc.stability.get(e) ?? NEUTRAL_STABILITY }));
   const tokens = profile.inputPerDay * days;
@@ -516,6 +542,7 @@ function modelEstimate(input: ModelInput, calc: ModelCalc, ranked: ClassifiedEnd
     contextTokens: input.requests ? input.inputTokens / input.requests : null,
     estimated: profile.estimated,
     defaultRange: live.length > 1 ? { low: Math.min(...live), high: Math.max(...live) } : null,
+    calibration,
   });
 }
 
@@ -584,7 +611,8 @@ export function buildOverview(ctx: Ctx): Overview {
     summary.default += cost.default ?? 0;
     summary.bans += cost.bans ?? cost.default ?? 0;
     summary.presets += cost.preset ?? cost.bans ?? cost.default ?? 0;
-    const estimate = presetCalc ? modelEstimate(input, basisCalc, presetRanked, current, profile, days) : null;
+    const calibration = modelCalibration(input, basisCalc, presetRanked, current, ctx);
+    const estimate = presetCalc ? modelEstimate(input, basisCalc, presetRanked, current, profile, days, calibration) : null;
     summary.presetsLow += estimate?.low ?? cost.bans ?? cost.default ?? 0;
     summary.presetsHigh += estimate?.high ?? cost.bans ?? cost.default ?? 0;
     if (estimate) estimates.push(estimate);
@@ -674,6 +702,7 @@ export function buildOverview(ctx: Ctx): Overview {
       presetId: presetCalc ? `@preset/${slugs.get(model.slug)!}` : null,
       cost,
       estimate,
+      calibration,
       scenarios: scenarioRows,
       endpoints,
       warnings,
@@ -961,7 +990,7 @@ export function buildPresets(ctx: Ctx, remote: ReadonlyMap<string, RemotePreset>
           saving: money.default !== null && money.preset !== null ? money.preset - money.default : null,
           savingPct: money.default && money.preset !== null ? (money.preset - money.default) / money.default : null,
         },
-        estimate: modelEstimate(input, calc, ranked, current, profile, days),
+        estimate: modelEstimate(input, calc, ranked, current, profile, days, modelCalibration(input, calc, ranked, current, ctx)),
         scenarios,
         config,
         hash,

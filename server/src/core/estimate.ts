@@ -10,6 +10,8 @@ export type Estimate = { value: number; low: number; high: number; confidence: C
 
 export type Drift = { hStd: number; rStd: number; days: number };
 
+export type Calibration = { actualUsd: number; predictedUsd: number; lowUsd: number; basis: "preset" | "default"; days: number; error: number };
+
 export type EstimateInput = {
   members: readonly { endpoint: Endpoint; stability: Stability }[];
   h: number;
@@ -19,6 +21,7 @@ export type EstimateInput = {
   contextTokens: number | null;
   estimated: boolean;
   defaultRange: { low: number; high: number } | null;
+  calibration?: Calibration | null;
 };
 
 const MIN_DRIFT_DAYS = 3;
@@ -43,6 +46,12 @@ export function workloadDrift(daily: readonly UsageDay[] | undefined): Drift | n
     rStd: std(days.map((d) => d.completion / d.prompt)),
     days: days.length,
   };
+}
+
+export function calibrate(actualUsd: number, lowUsd: number, predictedUsd: number, basis: Calibration["basis"], days: number): Calibration | null {
+  if (actualUsd <= 0 || predictedUsd <= 0) return null;
+  const error = actualUsd > predictedUsd ? actualUsd / predictedUsd - 1 : actualUsd < lowUsd ? actualUsd / lowUsd - 1 : 0;
+  return { actualUsd, predictedUsd, lowUsd, basis, days, error };
 }
 
 export function confidenceOf(risks: readonly Risk[]): Confidence {
@@ -116,6 +125,17 @@ export function presetEstimate(input: EstimateInput): Estimate | null {
       level: "info",
       text: `Default routing is modeled as OpenRouter's price-weighted spread. If it routes differently, the default would cost between ${usd(input.defaultRange.low)} and ${usd(input.defaultRange.high)}.`,
       impactUsd: null,
+    });
+  }
+
+  const cal = input.calibration;
+  if (cal && Math.abs(cal.error) > 0.05) {
+    const model = cal.basis === "preset" ? "the preset estimate" : "the default routing model";
+    risks.push({
+      kind: "calibration",
+      level: Math.abs(cal.error) > 0.2 ? "warn" : "info",
+      text: `Last ${cal.days} days you spent ${usd(cal.actualUsd)}, ${cal.error > 0 ? "above" : "below"} ${model} for the same traffic (${usd(cal.lowUsd)}–${usd(cal.predictedUsd)}) by ${pct(Math.abs(cal.error))}.`,
+      impactUsd: cal.error > 0 ? value * cal.error : null,
     });
   }
 
