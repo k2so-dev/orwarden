@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { configHash, presetConfig, presetSlugs } from "../src/services/analysis.ts";
-import { model } from "./helpers.ts";
+import { configHash, presetConfig, presetPrice, presetSlugs, rankForPreset, scoreEndpoints, type Profile } from "../src/services/analysis.ts";
+import { ep, model } from "./helpers.ts";
 import { testConfig } from "./helpers.ts";
 
 describe("preset slugs", () => {
@@ -60,7 +60,40 @@ describe("preset slugs", () => {
   });
 });
 
+describe("preset membership", () => {
+  const settings = testConfig();
+  const profile: Profile = { name: "test", h: 0.8, r: 0.05, tools: false, inputPerDay: 1_000_000, estimated: false };
+  const m = model(settings, "vendor/model", 1, [ep("a/fp8", 1, 2, 0.1), ep("b/fp8", 1.1, 2, 0.11), ep("c/fp8", 1.3, 2, 0.13)]);
+  const scores = scoreEndpoints(m.endpoints, profile, m.endpoints, settings.scoring);
+  const pick = (preset: { pinned?: string[]; picked?: string[] | null } = {}, premium = 0.15) =>
+    rankForPreset(m, profile, new Set(), scores, { model: m.slug, slug: null, autoSync: false, pinned: preset.pinned ?? [], excluded: [], picked: preset.picked ?? null, syncedHash: null, syncedAt: null }, 5, false, "score", premium).map((e) => e.tag);
+
+  test("keeps only endpoints within the price premium of the cheapest", () => {
+    expect(pick()).toEqual(["a/fp8", "b/fp8"]);
+    expect(pick({}, 0.5).sort()).toEqual(["a/fp8", "b/fp8", "c/fp8"]);
+  });
+
+  test("pinned and hand-picked endpoints bypass the premium", () => {
+    expect(pick({ pinned: ["c/fp8"] })).toEqual(["c/fp8", "a/fp8", "b/fp8"]);
+    expect(pick({ picked: ["a/fp8", "c/fp8"] })).toEqual(["a/fp8", "c/fp8"]);
+  });
+
+  test("prices the preset at its most expensive member", () => {
+    const [a, , c] = m.endpoints;
+    expect(presetPrice([a!, c!], 0.8, 0.05)).toBeCloseTo(0.2 * 1.3 + 0.8 * 0.13 + 0.05 * 2, 9);
+    expect(presetPrice([], 0.8, 0.05)).toBeNull();
+  });
+});
+
 describe("preset config", () => {
+  test("lists providers in only without an order so sticky routing keeps the cache", () => {
+    const m = model(testConfig(), "vendor/model", 1, []);
+    const config = presetConfig(m, [{ tag: "a/fp8", quantization: "fp8" }, { tag: "b/fp8", quantization: "fp8" }], { tools: false }, testConfig());
+    expect(config.provider.only).toEqual(["a/fp8", "b/fp8"]);
+    expect("order" in config.provider).toBe(false);
+    expect(config.provider.allow_fallbacks).toBe(true);
+  });
+
   test("drops the quantization filter when an endpoint uses a non-standard name", () => {
     const m = model(testConfig(), "vendor/model", 1, []);
     const standard = presetConfig(m, [{ tag: "a/fp8", quantization: "fp8" }], { tools: false }, testConfig());

@@ -110,7 +110,10 @@ const cell = "flex cursor-help flex-col justify-center gap-px border-l border-bo
 const cellLabel = "whitespace-nowrap text-[11.5px] text-muted-foreground";
 const cellValue = "tnum text-[17px] font-semibold tracking-[-0.01em]";
 const banTip = computed(() => [{ text: `${banCount.value}. Bans apply to every model.`, tone: "fg" as const }]);
-const presetTip = computed(() => [{ text: presetSub.value, tone: "fg" as const }]);
+const presetTip = computed(() => [
+  { text: presetSub.value, tone: "fg" as const },
+  { text: "Worst case: each preset is priced at its most expensive listed provider, because OpenRouter picks the provider inside the list and keeps a conversation there.", tone: "muted" as const },
+]);
 const riskTip = [{ text: "Share of traffic served at fp4 or undisclosed quantization under default routing, volume-weighted. Open-weight models only.", tone: "fg" as const }];
 </script>
 

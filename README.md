@@ -1,6 +1,6 @@
 # orwarden
 
-Self-hosted dashboard that keeps OpenRouter routing honest. It scores every provider endpoint of the models you use by price, speed and reliability, keeps a global provider ban list in the workspace default guardrail, and builds per-model presets (`@preset/<slug>`) that pin the most efficient providers in order.
+Self-hosted dashboard that keeps OpenRouter routing honest. It scores every provider endpoint of the models you use by price, speed and reliability, keeps a global provider ban list in the workspace default guardrail, and builds per-model presets (`@preset/<slug>`) that restrict each model to its most efficient providers without breaking the prompt cache mid-conversation.
 
 ![orwarden dashboard](docs/screenshot.png)
 
@@ -19,7 +19,7 @@ The server refreshes data on `REFRESH_CRON` (settings can override it). Schedule
 
 ## How it works
 
-orwarden answers one question per model: which providers should serve it, in which order, so you pay as little as possible without getting quantized or unreliable output. Everything below uses the defaults from Settings; every number in brackets is configurable.
+orwarden answers one question per model: which providers should serve it, so you pay as little as possible without getting quantized or unreliable output. Everything below uses the defaults from Settings; every number in brackets is configurable.
 
 ### Inputs
 
@@ -86,15 +86,15 @@ A preset is built per model from the saved workload, filters and weights, the sa
    - `score` (default): highest overall score first. Price weighs 60%, so this is "cheapest among fast and reliable".
    - `cost`: lowest effective price `C_eff` first, with the score as tie-breaker. This is the most economical option. Pick it if price is all that matters.
 
-3. **Top N.** The first `5` (1–20) endpoints form the preset.
-4. **Written config:**
+3. **Top N.** The first `5` (1–20) endpoints are the candidates.
+4. **Price band.** Candidates whose effective price `C_eff` is more than `15%` (*Max price premium*) above the cheapest candidate are dropped. Pinned and hand-picked endpoints are kept regardless.
+5. **Written config:**
 
    ```json
    {
      "model": "<model>",
      "provider": {
-       "order": ["<tag 1>", "<tag 2>", "..."],
-       "only": ["<same tags>"],
+       "only": ["<tag 1>", "<tag 2>", "..."],
        "allow_fallbacks": true,
        "quantizations": ["<min quant and above>"],
        "require_parameters": true
@@ -102,21 +102,21 @@ A preset is built per model from the saved workload, filters and weights, the sa
    }
    ```
 
-   - `order` and `only` are the ranked tags, so requests never leave the list.
-   - `allow_fallbacks` moves to the next endpoint in the list when one fails.
+   - `only` holds the selected tags, so requests never leave the list.
+   - There is no `order`. OpenRouter turns off sticky routing when a preset sets a manual order, so every request would go back to #1 and a conversation that fell back to another provider would lose its prompt cache twice. Without `order`, OpenRouter keeps a conversation (keyed by `session_id`, or by its first messages after a cache hit) on the provider that holds its cache. The price band keeps every provider in the list acceptable, because OpenRouter, not orwarden, chooses which one serves a new conversation.
+   - `allow_fallbacks` moves to another endpoint in the list when one fails.
    - `quantizations` is omitted for closed models and when an endpoint reports a non-standard quantization name.
    - `require_parameters` is set only for tool workloads.
 
 **Hand-picking.** The numbered tick in the first column of the endpoint table adds or removes an endpoint. After the first change the preset contains exactly the ticked endpoints (still in score order, only eligible ones, at most 20) until you press *Reset to top list*.
 
-**Expected price of a preset.** Requests go to #1. A share of them equal to its downtime falls through to #2, and so on down the list:
+**Price of a preset.** OpenRouter picks the provider inside the list, and in practice sends new conversations to one of them, so the preset is priced at its worst case:
 
 ```
-served_i = uptime_i × Π_{j<i} (1 − uptime_j)
-price    = Σ served_i · C_i / Σ served_i
+price = max_i C_i
 ```
 
-This is the "With presets" figure. It is compared with:
+This is the "With presets" figure; the real cost is at most this. It is compared with:
 
 - **Default routing:** what OpenRouter does without a preset. It spreads traffic across all non-ignored endpoints with weight `uptime / p²`, where `p` is `p_in` by default (`optimizer.routingPrice` in the settings API switches it to `p_in + p_out` or the blended `C`).
 - **With global bans:** the same spread after the ban list is applied.
@@ -139,7 +139,7 @@ The Providers tab shows, for every provider, how the cost of all tracked models 
 | Goal | Setting |
 | --- | --- |
 | Cheapest preset regardless of speed | Settings → Ranking: `cost`, or raise the price weight |
-| Fewer, cheaper fallbacks | Lower *Top N providers*; the preset price shows what each extra fallback adds |
+| Fewer, cheaper fallbacks | Lower *Max price premium* or *Top N providers*; the preset price is set by its most expensive member |
 | Price your real mix | Keep *Actual* on the workload bar, or move the sliders to describe your client (agents: high cache, short answers) |
 | Accept cheaper low-precision providers | Lower min quantization (quality risk; shown as "Risk" on the Models tab) |
 | Spend less on retries | Keep min uptime high; `C_eff` already charges for downtime |

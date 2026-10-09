@@ -173,8 +173,8 @@ describe("api flow", () => {
     expect(p.config.provider.only.length).toBeLessThanOrEqual(5);
     expect(p.config.provider.quantizations).not.toContain("fp4");
     expect(p.ranked[0].pIn).toBeGreaterThan(0);
-    expect(p.ranked.reduce((a: number, e: any) => a + e.share, 0)).toBeCloseTo(1, 5);
-    expect(p.perM.preset).toBeGreaterThan(0);
+    expect(p.config.provider.order).toBeUndefined();
+    expect(p.perM.preset).toBeCloseTo(Math.max(...p.ranked.map((e: any) => e.costPerM)), 9);
     expect(p.scenarios.map((s: any) => s.name)).toContain("agent");
     expect(p.cheapest.costPerM).toBeLessThanOrEqual(p.ranked[0].costPerM);
     const sync = await ctx.call("/api/presets/sync", { method: "POST", body: { models: [DEEPSEEK] } });
@@ -239,13 +239,13 @@ describe("api flow", () => {
     expect(reset.hash).toBe(base.hash);
   });
 
-  test("preset status follows the remote config", async () => {
+  test("a remote preset that still pins an order is out of date", async () => {
     await ctx.call("/api/refresh", { method: "POST", body: {} });
     await ctx.call("/api/presets/sync", { method: "POST", body: { models: [DEEPSEEK] } });
     const p = (await ctx.call("/api/presets?fresh=true")).body.find((x: any) => x.model === DEEPSEEK);
     expect(p.status).toBe("up-to-date");
     const remote = ctx.mock.presets.get(p.slug)!.designated_version!.config as any;
-    remote.provider.order = [...remote.provider.order].reverse();
+    remote.provider.order = [...remote.provider.only];
     const changed = (await ctx.call("/api/presets?fresh=true")).body.find((x: any) => x.model === DEEPSEEK);
     expect(changed.status).toBe("out-of-date");
   });

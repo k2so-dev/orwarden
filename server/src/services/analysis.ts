@@ -250,6 +250,7 @@ export function rankForPreset(
   topN: number,
   zdrOnly: boolean,
   rankBy: Settings["presets"]["rankBy"] = "score",
+  maxPremium = Number.POSITIVE_INFINITY,
 ): ClassifiedEndpoint[] {
   const excluded = new Set(preset?.excluded ?? []);
   const eligible = model.endpoints.filter((e) => isEligible(e, profile, banned, zdrOnly) && !excluded.has(e.tag));
@@ -268,36 +269,19 @@ export function rankForPreset(
         a.tag.localeCompare(b.tag),
     );
   const seen = new Set<string>();
-  return [...pinned, ...rest].filter((e) => !seen.has(e.tag) && Boolean(seen.add(e.tag))).slice(0, topN);
+  const top = [...pinned, ...rest].filter((e) => !seen.has(e.tag) && Boolean(seen.add(e.tag))).slice(0, topN);
+  const free = top.filter((e) => !pinned.includes(e));
+  if (free.length === 0) return top;
+  const ceiling = Math.min(...free.map((e) => effectivePerM(e, profile))) * (1 + maxPremium);
+  return top.filter((e) => pinned.includes(e) || effectivePerM(e, profile) <= ceiling * (1 + 1e-9));
 }
 
 export function effectivePerM(e: ClassifiedEndpoint, profile: { h: number; r: number }): number {
   return unitCost(e, profile.h, profile.r) / Math.max(e.uptime, 0.01);
 }
 
-export function orderedShares(ranked: ClassifiedEndpoint[]): number[] {
-  let reach = 1;
-  const served = ranked.map((e) => {
-    const s = reach * e.uptime;
-    reach *= 1 - e.uptime;
-    return s;
-  });
-  const total = served.reduce((a, b) => a + b, 0);
-  return served.map((s) => (total > 0 ? s / total : 0));
-}
-
-export function orderedPrice(ranked: ClassifiedEndpoint[], h: number, r: number): number | null {
-  if (ranked.length === 0) return null;
-  let reach = 1;
-  let weight = 0;
-  let total = 0;
-  for (const e of ranked) {
-    const served = reach * e.uptime;
-    weight += served;
-    total += served * unitCost(e, h, r);
-    reach *= 1 - e.uptime;
-  }
-  return weight > 0 ? total / weight : null;
+export function presetPrice(ranked: readonly ClassifiedEndpoint[], h: number, r: number): number | null {
+  return ranked.length === 0 ? null : Math.max(...ranked.map((e) => unitCost(e, h, r)));
 }
 
 export function servable<T extends { tools: boolean }>(ranked: readonly T[], tools: boolean): T[] {
@@ -378,7 +362,6 @@ export function presetConfig(model: ClassifiedModel, ranked: readonly Pick<Class
   return {
     model: model.slug,
     provider: {
-      order: tags,
       only: tags,
       allow_fallbacks: true,
       ...(model.openWeights !== false && standard ? { quantizations: allowedQuantizations(model.slug, settings) } : {}),
@@ -491,7 +474,7 @@ function calcModel(input: ModelInput, ctx: Ctx, basis: Basis, current: Set<strin
   const profile = resolveProfile(input, ctx.settings, basis.q);
   const pool = model.endpoints.filter((e) => isEligible(e, profile, desired, basis.zdrOnly));
   const scores = scoreEndpoints(model.endpoints, profile, pool, basis.weights);
-  const ranked = rankForPreset(model, profile, desired, scores, ctx.presets.get(model.slug), ctx.settings.presets.topN, basis.zdrOnly, ctx.settings.presets.rankBy);
+  const ranked = rankForPreset(model, profile, desired, scores, ctx.presets.get(model.slug), ctx.settings.presets.topN, basis.zdrOnly, ctx.settings.presets.rankBy, ctx.settings.presets.maxPremium);
   return { model, profile, scores, pool, ranked, shares: routingShares(model, current, profile, ctx.settings) };
 }
 
@@ -501,7 +484,7 @@ function costs(model: ClassifiedModel, ranked: ClassifiedEndpoint[] | null, curr
   return {
     default: toMoney(pricePerMillion(model, current, p.h, p.r, p.tools, mode).price),
     bans: toMoney(pricePerMillion(model, desired, p.h, p.r, p.tools, mode).price),
-    preset: ranked ? toMoney(orderedPrice(servable(ranked, p.tools), p.h, p.r)) : null,
+    preset: ranked ? toMoney(presetPrice(servable(ranked, p.tools), p.h, p.r)) : null,
   };
 }
 
@@ -791,7 +774,6 @@ export type PresetEndpoint = {
   cacheKnown: boolean;
   costPerM: number;
   effectivePerM: number;
-  share: number;
   costHorizon: number;
   vsCheapest: number | null;
   uptime: number;
@@ -865,7 +847,6 @@ export function buildPresets(ctx: Ctx, remote: ReadonlyMap<string, RemotePreset>
                   : "out-of-date";
       const cheapestEp = eligible.reduce<ClassifiedEndpoint | null>((best, e) => (!best || unitCost(e, profile.h, profile.r) < unitCost(best, profile.h, profile.r) ? e : best), null);
       const cheapestCost = cheapestEp ? unitCost(cheapestEp, profile.h, profile.r) : null;
-      const shares = orderedShares(ranked);
       const pinned = new Set(preset?.pinned ?? []);
       const mode = settings.optimizer.routingPrice;
       const toMoney = (perM: number | null, perDay: number) => (perM === null ? null : (perM * perDay * days) / 1_000_000);
@@ -881,7 +862,7 @@ export function buildPresets(ctx: Ctx, remote: ReadonlyMap<string, RemotePreset>
           tools: p.tools,
           inputPerDay: p.inputPerDay,
           default: toMoney(pricePerMillion(model, current, p.h, p.r, p.tools, mode).price, p.inputPerDay),
-          preset: toMoney(orderedPrice(servable(ranked, p.tools), p.h, p.r), p.inputPerDay),
+          preset: toMoney(presetPrice(servable(ranked, p.tools), p.h, p.r), p.inputPerDay),
         };
       });
       return {
@@ -911,8 +892,7 @@ export function buildPresets(ctx: Ctx, remote: ReadonlyMap<string, RemotePreset>
             cacheKnown: e.cacheKnown,
             costPerM,
             effectivePerM: effectivePerM(e, profile),
-            share: shares[i]!,
-            costHorizon: (shares[i]! * costPerM * profile.inputPerDay * days) / 1_000_000,
+            costHorizon: (costPerM * profile.inputPerDay * days) / 1_000_000,
             vsCheapest: cheapestCost && cheapestCost > 0 ? costPerM / cheapestCost - 1 : null,
             uptime: e.uptime,
             tps: e.tps,
@@ -932,7 +912,7 @@ export function buildPresets(ctx: Ctx, remote: ReadonlyMap<string, RemotePreset>
         },
         perM: {
           default: pricePerMillion(model, current, profile.h, profile.r, profile.tools, mode).price,
-          preset: orderedPrice(ranked, profile.h, profile.r),
+          preset: presetPrice(ranked, profile.h, profile.r),
         },
         cost: {
           default: money.default,

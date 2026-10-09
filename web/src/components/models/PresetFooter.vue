@@ -10,6 +10,7 @@ import { dryRun, settings, writeBlocked } from "@/stores/data";
 const props = defineProps<{ preset: PresetView }>();
 
 const topN = computed(() => settings.value?.presets.topN ?? 5);
+const premium = computed(() => settings.value?.presets.maxPremium ?? 0.15);
 const blocked = computed(() => props.preset.status === "empty");
 const jsonOpen = ref(false);
 const json = computed(() => JSON.stringify(props.preset.config, null, 2));
@@ -18,7 +19,9 @@ const line = computed(() => {
   const p = props.preset;
   const parts = [
     `${p.ranked.length} endpoint${p.ranked.length === 1 ? "" : "s"}`,
-    p.rankBy === "cost" ? "cheapest effective first" : "score order",
+    p.picked ? "ticked endpoints" : p.rankBy === "cost" ? "cheapest effective" : "top by score",
+    ...(p.picked ? [] : [`within +${Math.round(premium.value * 100)}% of cheapest`]),
+    "no fixed order (cache-friendly)",
     ...(p.policy.fallbacks ? ["fallbacks within list"] : []),
     ...(min.value && p.policy.quantizations.length > 0 ? [`${min.value}+ only`] : []),
     ...(p.policy.zdr ? ["ZDR"] : []),
