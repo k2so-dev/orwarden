@@ -81,6 +81,8 @@ Scores run from 0 to 100 and are relative to the eligible endpoints of the same 
 
 A preset is built per model from the saved workload, filters and weights, the same ones the tables show, so what you see is what gets written.
 
+**Model rules.** *Model rules* above a model's endpoint table replaces any header value for that model only: workload (cache hit, output/input, volume), tool calling, min quantization, min uptime, ZDR, the four weights and *Top N providers*. Rules that are off follow the header. The model's prices, scores, estimate, change feed and preset all use its own rules. Global bans still use the global filters, because they apply to every model.
+
 1. **Eligible.** The endpoint must:
    - have the verdict `ok`;
    - support tools when the preset workload needs them;
@@ -91,9 +93,8 @@ A preset is built per model from the saved workload, filters and weights, the sa
    - `score` (default): highest overall score first. Price weighs 60%, so this is "cheapest among fast and reliable".
    - `cost`: lowest effective price `C_eff` first, with the score as tie-breaker. This is the most economical option. Pick it if price is all that matters.
 
-3. **Top N.** The first `5` (1–20) endpoints are the candidates.
-4. **Price band.** Candidates whose effective price `C_eff` is more than `15%` (*Max price premium*) above the cheapest candidate are dropped. Pinned and hand-picked endpoints are kept regardless.
-5. **Written config:**
+3. **Top N.** The first `5` (1–20) endpoints go into the preset, whatever their price. Fewer are listed only when fewer are eligible. Untick an expensive one by hand if it should not be there.
+4. **Written config:**
 
    ```json
    {
@@ -108,7 +109,7 @@ A preset is built per model from the saved workload, filters and weights, the sa
    ```
 
    - `only` holds the selected tags, so requests never leave the list.
-   - There is no `order`. OpenRouter turns off sticky routing when a preset sets a manual order, so every request would go back to #1 and a conversation that fell back to another provider would lose its prompt cache twice. Without `order`, OpenRouter keeps a conversation (keyed by `session_id`, or by its first messages after a cache hit) on the provider that holds its cache. The price band keeps every provider in the list acceptable, because OpenRouter, not orwarden, chooses which one serves a new conversation.
+   - There is no `order`. OpenRouter turns off sticky routing when a preset sets a manual order, so every request would go back to #1 and a conversation that fell back to another provider would lose its prompt cache twice. Without `order`, OpenRouter keeps a conversation (keyed by `session_id`, or by its first messages after a cache hit) on the provider that holds its cache. OpenRouter, not orwarden, chooses which listed provider serves a new conversation, so the preset is priced at its most expensive member.
    - `allow_fallbacks` moves to another endpoint in the list when one fails.
    - `quantizations` is omitted for closed models and when an endpoint reports a non-standard quantization name.
    - `require_parameters` is set only for tool workloads.
@@ -123,7 +124,7 @@ A preset is built per model from the saved workload, filters and weights, the sa
 
 Held providers count towards the preset price, because their conversations really pay that price. Analytics are queried only when a sync would drop something.
 
-**Hand-picking.** The numbered tick in the first column of the endpoint table adds or removes an endpoint. After the first change the preset contains exactly the ticked endpoints (still in score order, only eligible ones, at most 20) until you press *Reset to top list*.
+**Hand-picking.** The numbered tick in the first column of the endpoint table adds or removes an endpoint. After the first change the preset contains exactly the ticked endpoints (still in score order, only eligible ones, at most 20) until you press *Reset to top N*.
 
 **Price of a preset.** OpenRouter picks the provider inside the list, and in practice sends new conversations to one of them, so the preset is priced at its worst case:
 
@@ -174,7 +175,7 @@ The Providers tab shows, for every provider, how the cost of all tracked models 
 | Goal | Setting |
 | --- | --- |
 | Cheapest preset regardless of speed | Settings → Ranking: `cost`, or raise the price weight |
-| Fewer, cheaper fallbacks | Lower *Max price premium* or *Top N providers*; the preset price is set by its most expensive member |
+| Fewer, cheaper fallbacks | Lower *Top N providers* (globally or in *Model rules*) or untick expensive endpoints; the preset price is set by its most expensive member |
 | Price your real mix | Keep *Actual* on the workload bar, or move the sliders to describe your client (agents: high cache, short answers) |
 | Accept cheaper low-precision providers | Lower min quantization (quality risk; shown as "Risk" on the Models tab) |
 | Spend less on retries | Keep min uptime high; `C_eff` already charges for downtime |

@@ -59,7 +59,6 @@ export const SettingsSchema = z.object({
     slugPattern: z.string().includes("{model}"),
     defaultScenario: z.string(),
     rankBy: z.enum(["score", "cost"]),
-    maxPremium: z.number().min(0).max(5),
     holdHours: z.number().min(0).max(168),
     holdMaxUsd: z.number().min(0).max(1000),
   }),
@@ -76,6 +75,38 @@ export const SettingsSchema = z.object({
 });
 
 export type Settings = z.infer<typeof SettingsSchema>;
+
+export const ModelOverridesSchema = z
+  .object({
+    workload: SettingsSchema.shape.workload,
+    requireTools: z.boolean(),
+    minQuantization: z.string(),
+    minUptime: ratio,
+    zdrOnly: z.boolean(),
+    scoring: z.object({ price: z.number().min(0), speed: z.number().min(0), reliability: z.number().min(0), stability: z.number().min(0) }),
+    topN: z.number().int().min(1).max(20),
+  })
+  .partial()
+  .strict();
+
+export type ModelOverrides = z.infer<typeof ModelOverridesSchema>;
+
+export function modelSettings(settings: Settings, o: ModelOverrides | undefined): Settings {
+  if (!o || Object.keys(o).length === 0) return settings;
+  return {
+    ...settings,
+    workload: o.workload ?? settings.workload,
+    filters: {
+      ...settings.filters,
+      requireTools: o.requireTools ?? settings.filters.requireTools,
+      minQuantization: o.minQuantization ?? settings.filters.minQuantization,
+      minUptime: o.minUptime ?? settings.filters.minUptime,
+      zdrOnly: o.zdrOnly ?? settings.filters.zdrOnly,
+    },
+    scoring: { ...settings.scoring, ...o.scoring },
+    presets: { ...settings.presets, topN: o.topN ?? settings.presets.topN },
+  };
+}
 export type Config = Settings;
 export type RoutingPrice = Settings["optimizer"]["routingPrice"];
 export type Mode = Settings["mode"];
@@ -112,7 +143,7 @@ export const DEFAULT_SETTINGS: Settings = {
     hysteresis: { banAfterRuns: 2, unbanAfterRuns: 3 },
   },
   scoring: { price: 60, speed: 20, reliability: 20, stability: 10, unknownQuantPenalty: 15 },
-  presets: { topN: 5, slugPattern: "{model}-safe", defaultScenario: "actual", rankBy: "score", maxPremium: 0.15, holdHours: 24, holdMaxUsd: 1 },
+  presets: { topN: 5, slugPattern: "{model}-safe", defaultScenario: "actual", rankBy: "score", holdHours: 24, holdMaxUsd: 1 },
   scenarios: {
     days: 7,
     inputTokensPerDay: 1_000_000,

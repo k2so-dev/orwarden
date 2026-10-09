@@ -259,6 +259,28 @@ describe("api flow", () => {
     expect(reset.hash).toBe(base.hash);
   });
 
+  test("model overrides replace the global rules for that model only", async () => {
+    await ctx.call("/api/refresh", { method: "POST", body: {} });
+    const before = (await ctx.call("/api/presets")).body;
+    const bad = await ctx.call("/api/presets/settings", { method: "PUT", body: { model: DEEPSEEK, overrides: { topN: 0 } } });
+    expect(bad.status).toBe(400);
+    const overrides = { topN: 1, workload: { mode: "custom", h: 0.9, r: 0.1, tokensPerDay: 5_000_000 } };
+    await ctx.call("/api/presets/settings", { method: "PUT", body: { model: DEEPSEEK, overrides } });
+    const after = (await ctx.call("/api/presets")).body;
+    const own = after.find((x: any) => x.model === DEEPSEEK);
+    expect(own.overrides).toEqual(overrides);
+    expect(own.topN).toBe(1);
+    expect(own.ranked).toHaveLength(1);
+    expect(own.profile).toMatchObject({ h: 0.9, r: 0.1, inputPerDay: 5_000_000 });
+    const models = (await ctx.call("/api/overview")).body.models;
+    expect((await ctx.call("/api/settings")).body.presets.topN).toBe(5);
+    const model = models.find((m: any) => m.slug === DEEPSEEK);
+    expect(model.overrides).toEqual(overrides);
+    expect(model.profile.h).toBe(0.9);
+    await ctx.call("/api/presets/settings", { method: "PUT", body: { model: DEEPSEEK, overrides: {} } });
+    expect((await ctx.call("/api/presets")).body.find((x: any) => x.model === DEEPSEEK).hash).toBe(before.find((x: any) => x.model === DEEPSEEK).hash);
+  });
+
   test("a dropped provider stays while its cache is warm", async () => {
     await ctx.call("/api/refresh", { method: "POST", body: {} });
     const eligible = (await ctx.call("/api/overview")).body.models.find((m: any) => m.slug === DEEPSEEK).endpoints.filter((e: any) => e.eligible);
@@ -310,7 +332,7 @@ describe("api flow", () => {
   });
 
   test("slugs of untracked models stay reserved and own slugs stay editable", async () => {
-    ctx.store.savePresetSettings({ model: "gone/model", slug: "foo-safe", autoSync: false, pinned: [], excluded: [], picked: null, syncedHash: null, syncedAt: null });
+    ctx.store.savePresetSettings({ model: "gone/model", slug: "foo-safe", autoSync: false, pinned: [], excluded: [], picked: null, overrides: {}, syncedHash: null, syncedAt: null });
     const clash = await ctx.call("/api/presets/settings", { method: "PUT", body: { model: DEEPSEEK, slug: "foo-safe" } });
     expect(clash.status).toBe(409);
     const own = await ctx.call("/api/presets/settings", { method: "PUT", body: { model: "gone/model", autoSync: true } });

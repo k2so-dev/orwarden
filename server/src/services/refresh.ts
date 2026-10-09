@@ -141,7 +141,7 @@ export async function refresh(rt: Runtime, scheduled = false): Promise<RefreshRe
     );
     rt.store.recordPrices(snapshot.takenAt, snapshot.models);
     rt.invalidateHistory();
-    const priceLines = priceChanges(rt.store.priceEvents(""), changeProfiles(snapshot, settings))
+    const priceLines = priceChanges(rt.store.priceEvents(""), changeProfiles(snapshot, settings, rt.store.presetSettings()))
       .filter((c) => c.ts === snapshot.takenAt && isSignificant(c))
       .map(changeLine);
     if (!rt.store.getValue<boolean>("policies_imported")) {

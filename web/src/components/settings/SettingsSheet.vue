@@ -55,11 +55,6 @@ watch(settingsOpen, (open) => {
 
 const s = computed(() => draft.value);
 
-function setPremium(raw: string) {
-  if (!draft.value) return;
-  draft.value.presets.maxPremium = raw.trim() === "" ? Number.NaN : Number(raw) / 100;
-}
-
 function setUptime(raw: string) {
   if (!draft.value) return;
   draft.value.filters.minUptime = raw.trim() === "" ? Number.NaN : Number(raw) / 100;
@@ -296,14 +291,6 @@ const btn = "h-8 rounded-lg border border-border bg-background px-3 text-[13px] 
             <div class="text-xs text-muted-foreground">which providers enter a preset</div>
           </div>
           <Segmented v-model="rankBy" :options="RANK_OPTIONS" size="sm" />
-          <div>
-            <div class="font-medium">Max price premium</div>
-            <div class="text-xs text-muted-foreground">OpenRouter may route a whole conversation to any listed provider</div>
-          </div>
-          <div class="flex items-center gap-1.5">
-            <input :value="Number((s.presets.maxPremium * 100).toFixed(1))" type="number" min="0" max="500" step="5" :class="num" @input="setPremium(($event.target as HTMLInputElement).value)" />
-            <span class="text-muted-foreground">%</span>
-          </div>
           <div>
             <div class="font-medium">Keep dropped providers</div>
             <div class="text-xs text-muted-foreground">while their conversations use the cache, up to this long and this much extra</div>

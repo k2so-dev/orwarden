@@ -10,7 +10,7 @@ import type { Guardrail } from "../core/openrouter.ts";
 import { admissibleCount, optimize, totalCount, violations, type Violation } from "../core/optimizer.ts";
 import type { ClassifiedEndpoint, ClassifiedModel, Issue, ModelInput } from "../core/types.ts";
 import { HISTORY_DAYS, type Hold, type Policy, type PresetSettings, type PriceEvent, type RunRecord } from "../db.ts";
-import { PRESET_SLUG_RE, type Settings } from "../settings.ts";
+import { modelSettings, PRESET_SLUG_RE, type ModelOverrides, type Settings } from "../settings.ts";
 
 export type AppSnapshot = {
   takenAt: string;
@@ -104,6 +104,7 @@ export type ModelView = {
   profile: Profile;
   counts: { ok: number; outlier: number; hardBad: number };
   presetId: string | null;
+  overrides: ModelOverrides;
   cost: CostTriple;
   estimate: Estimate | null;
   calibration: Calibration | null;
@@ -262,7 +263,6 @@ export function rankForPreset(
   topN: number,
   zdrOnly: boolean,
   rankBy: Settings["presets"]["rankBy"] = "score",
-  maxPremium = Number.POSITIVE_INFINITY,
 ): ClassifiedEndpoint[] {
   const excluded = new Set(preset?.excluded ?? []);
   const eligible = model.endpoints.filter((e) => isEligible(e, profile, banned, zdrOnly) && !excluded.has(e.tag));
@@ -281,13 +281,7 @@ export function rankForPreset(
         a.tag.localeCompare(b.tag),
     );
   const seen = new Set<string>();
-  const ordered = [...pinned, ...rest].filter((e) => !seen.has(e.tag) && Boolean(seen.add(e.tag)));
-  const top = ordered.slice(0, topN);
-  const free = top.filter((e) => !pinned.includes(e));
-  if (free.length === 0) return top;
-  const ceiling = Math.min(...free.map((e) => effectivePerM(e, profile))) * (1 + maxPremium);
-  const fits = (e: ClassifiedEndpoint) => pinned.includes(e) || effectivePerM(e, profile) <= ceiling * (1 + 1e-9);
-  return ordered.filter(fits).slice(0, topN);
+  return [...pinned, ...rest].filter((e) => !seen.has(e.tag) && Boolean(seen.add(e.tag))).slice(0, topN);
 }
 
 export function effectivePerM(e: ClassifiedEndpoint, profile: { h: number; r: number }): number {
@@ -484,8 +478,27 @@ function viewBasis(ctx: Ctx): Basis {
   };
 }
 
+export function modelQuery(q: ViewQuery, o: ModelOverrides, settings: Settings): ViewQuery {
+  const saved = savedQuery(settings);
+  const { h: _h, r: _r, tokensPerDay: _t, ...rest } = q;
+  const base: ViewQuery = o.workload ? { ...rest, scenario: saved.scenario, h: saved.h, r: saved.r, tokensPerDay: saved.tokensPerDay } : { ...q };
+  if (o.requireTools !== undefined) base.tools = o.requireTools;
+  if (o.minQuantization !== undefined) base.minQuantization = o.minQuantization;
+  if (o.minUptime !== undefined) base.minUptime = o.minUptime;
+  if (o.zdrOnly !== undefined) base.zdrOnly = o.zdrOnly;
+  if (o.scoring) Object.assign(base, { wPrice: o.scoring.price, wSpeed: o.scoring.speed, wReliability: o.scoring.reliability, wStability: o.scoring.stability });
+  return base;
+}
+
+export function modelCtx(ctx: Ctx, model: string): Ctx {
+  const o = ctx.presets.get(model)?.overrides;
+  if (!o || Object.keys(o).length === 0) return ctx;
+  const settings = modelSettings(ctx.settings, o);
+  return { ...ctx, settings, q: modelQuery(ctx.q, o, settings) };
+}
+
 export function presetBasis(ctx: Ctx, model: string): Basis {
-  const { settings } = ctx;
+  const { settings } = modelCtx(ctx, model);
   return {
     settings,
     q: savedQuery(settings),
@@ -502,7 +515,7 @@ function calcModel(input: ModelInput, ctx: Ctx, basis: Basis, current: Set<strin
   const stability = new Map(model.endpoints.map((e, i) => [e, found[i]!]));
   const scores = scoreEndpoints(model.endpoints, profile, pool, basis.weights, stability);
   const preset = ctx.presets.get(model.slug);
-  const base = rankForPreset(model, profile, desired, scores, preset, ctx.settings.presets.topN, basis.zdrOnly, ctx.settings.presets.rankBy, ctx.settings.presets.maxPremium);
+  const base = rankForPreset(model, profile, desired, scores, preset, basis.settings.presets.topN, basis.zdrOnly, ctx.settings.presets.rankBy);
   const excluded = new Set(preset?.excluded ?? []);
   const held = new Map<ClassifiedEndpoint, Hold>();
   for (const h of ctx.holds?.get(model.slug) ?? []) {
@@ -608,22 +621,24 @@ export function remoteMatches(remote: RemotePreset | undefined, syncedHash: stri
 }
 
 export function buildOverview(ctx: Ctx): Overview {
-  const { snapshot, settings, q } = ctx;
-  const view = viewBasis(ctx);
-  const days = q.days ?? settings.scenarios.days;
+  const { snapshot, q } = ctx;
+  const days = q.days ?? ctx.settings.scenarios.days;
   const current = currentBans(snapshot);
   const desired = desiredBans(ctx.bans);
-  const slugs = trackedSlugs(snapshot.models, settings, ctx.presets);
+  const slugs = trackedSlugs(snapshot.models, ctx.settings, ctx.presets);
   const summary = { default: 0, bans: 0, presets: 0, presetsLow: 0, presetsHigh: 0, confidence: "high" as Confidence, riskShare: 0 };
   const estimates: Estimate[] = [];
   let riskVolume = 0;
   let volume = 0;
 
   const models: ModelView[] = snapshot.models.map((input) => {
-    const calc = calcModel(input, ctx, view, current, desired);
+    const mctx = modelCtx(ctx, input.slug);
+    const { settings } = mctx;
+    const view = viewBasis(mctx);
+    const calc = calcModel(input, mctx, view, current, desired);
     const { model, profile, scores, pool, shares, stability } = calc;
     const basis = presetBasis(ctx, input.slug);
-    const basisCalc = calcModel(input, ctx, basis, current, desired);
+    const basisCalc = calcModel(input, mctx, basis, current, desired);
     const presetCalc = hasPreset(input) ? basisCalc : null;
     const presetRanked = presetCalc?.ranked ?? null;
     const presetRank = new Map((presetRanked ?? []).map((e, i) => [basisCalc.model.endpoints.indexOf(e), i + 1]));
@@ -631,7 +646,7 @@ export function buildOverview(ctx: Ctx): Overview {
     summary.default += cost.default ?? 0;
     summary.bans += cost.bans ?? cost.default ?? 0;
     summary.presets += cost.preset ?? cost.bans ?? cost.default ?? 0;
-    const calibration = modelCalibration(input, basisCalc, presetRanked, current, ctx);
+    const calibration = modelCalibration(input, basisCalc, presetRanked, current, mctx);
     const estimate = presetCalc ? modelEstimate(input, basisCalc, presetRanked, current, profile, days, calibration) : null;
     summary.presetsLow += estimate?.low ?? cost.bans ?? cost.default ?? 0;
     summary.presetsHigh += estimate?.high ?? cost.bans ?? cost.default ?? 0;
@@ -690,7 +705,7 @@ export function buildOverview(ctx: Ctx): Overview {
       { name: DEFAULT_SCENARIO, tools: false, h: input.h, r: input.r },
       ...settings.scenarios.profiles.map((p) => ({ name: p.name, tools: p.tools, h: p.h, r: p.r })),
     ].map((s) => {
-      const p = resolveProfile(input, settings, { ...q, scenario: s.name, tokensPerDay: q.tokensPerDay ?? profile.inputPerDay });
+      const p = resolveProfile(input, settings, { ...mctx.q, scenario: s.name, tokensPerDay: mctx.q.tokensPerDay ?? profile.inputPerDay });
       return { ...s, h: p.h, r: p.r, tools: p.tools, inputPerDay: p.inputPerDay, ...costs(model, presetRanked, current, desired, p, days, settings) };
     });
 
@@ -721,6 +736,7 @@ export function buildOverview(ctx: Ctx): Overview {
         hardBad: model.endpoints.filter((e) => e.cls === "hard-bad").length,
       },
       presetId: presetCalc ? `@preset/${slugs.get(model.slug)!}` : null,
+      overrides: ctx.presets.get(model.slug)?.overrides ?? {},
       cost,
       estimate,
       calibration,
@@ -733,6 +749,7 @@ export function buildOverview(ctx: Ctx): Overview {
   models.sort((a, b) => (b.cost.default ?? 0) - (a.cost.default ?? 0) || a.slug.localeCompare(b.slug));
   summary.riskShare = volume > 0 ? riskVolume / volume : 0;
   summary.confidence = confidenceOf(estimates.filter((e) => e.value >= summary.presets * 0.05).flatMap((e) => e.risks));
+  const { settings } = ctx;
   const named = settings.scenarios.profiles.find((p) => p.name === q.scenario);
   return {
     takenAt: snapshot.takenAt,
@@ -789,7 +806,7 @@ export function buildProviders(ctx: Ctx): ProvidersView {
   const desired = desiredBans(ctx.bans);
   const fixed = fixedBans(ctx.bans);
   const models = snapshot.models.map((m) => classifyModel(m, vs));
-  const profiles = new Map(snapshot.models.map((m) => [m.slug, resolveProfile(m, settings, q)]));
+  const profiles = modelProfiles(ctx);
   const target = optimize(models, fixed, vs, allowedProviders(ctx.bans)).target;
   const k = settings.optimizer.minEndpointsPerModel;
 
@@ -888,6 +905,8 @@ export type PresetView = {
   pinned: string[];
   excluded: string[];
   picked: string[] | null;
+  overrides: ModelOverrides;
+  topN: number;
   rankBy: Settings["presets"]["rankBy"];
   ranked: PresetEndpoint[];
   cheapest: { tag: string; providerName: string; costPerM: number } | null;
@@ -914,7 +933,7 @@ export function presetPools(ctx: Ctx, models: readonly string[]): Map<string, Pr
   const desired = desiredBans(ctx.bans);
   const out = new Map<string, PresetPool>();
   for (const input of ctx.snapshot.models.filter((m) => hasPreset(m) && models.includes(m.slug))) {
-    const calc = calcModel(input, { ...ctx, holds: undefined }, presetBasis(ctx, input.slug), current, desired);
+    const calc = calcModel(input, { ...modelCtx(ctx, input.slug), holds: undefined }, presetBasis(ctx, input.slug), current, desired);
     const excluded = new Set(ctx.presets.get(input.slug)?.excluded ?? []);
     out.set(input.slug, { base: calc.base, pool: calc.pool.filter((e) => !excluded.has(e.tag)), profile: calc.profile });
   }
@@ -922,17 +941,19 @@ export function presetPools(ctx: Ctx, models: readonly string[]): Map<string, Pr
 }
 
 export function buildPresets(ctx: Ctx, remote: ReadonlyMap<string, RemotePreset>): PresetView[] {
-  const { snapshot, settings, q } = ctx;
-  const days = q.days ?? settings.scenarios.days;
+  const { snapshot, q } = ctx;
+  const days = q.days ?? ctx.settings.scenarios.days;
   const current = currentBans(snapshot);
   const desired = desiredBans(ctx.bans);
-  const slugs = trackedSlugs(snapshot.models, settings, ctx.presets);
+  const slugs = trackedSlugs(snapshot.models, ctx.settings, ctx.presets);
   return snapshot.models
     .filter(hasPreset)
     .map((input) => {
       const preset = ctx.presets.get(input.slug);
+      const mctx = modelCtx(ctx, input.slug);
+      const { settings } = mctx;
       const basis = presetBasis(ctx, input.slug);
-      const calc = calcModel(input, ctx, basis, current, desired);
+      const calc = calcModel(input, mctx, basis, current, desired);
       const { model, profile, ranked, scores, pool } = calc;
       const excludedTags = new Set(preset?.excluded ?? []);
       const eligible = pool.filter((e) => !excludedTags.has(e.tag));
@@ -985,6 +1006,8 @@ export function buildPresets(ctx: Ctx, remote: ReadonlyMap<string, RemotePreset>
         pinned: preset?.pinned ?? [],
         excluded: preset?.excluded ?? [],
         picked: preset?.picked ?? null,
+        overrides: preset?.overrides ?? {},
+        topN: settings.presets.topN,
         rankBy: settings.presets.rankBy,
         ranked: ranked.map((e, i) => {
           const costPerM = unitCost(e, profile.h, profile.r);
@@ -1029,7 +1052,7 @@ export function buildPresets(ctx: Ctx, remote: ReadonlyMap<string, RemotePreset>
           saving: money.default !== null && money.preset !== null ? money.preset - money.default : null,
           savingPct: money.default && money.preset !== null ? (money.preset - money.default) / money.default : null,
         },
-        estimate: modelEstimate(input, calc, ranked, current, profile, days, modelCalibration(input, calc, ranked, current, ctx)),
+        estimate: modelEstimate(input, calc, ranked, current, profile, days, modelCalibration(input, calc, ranked, current, mctx)),
         scenarios,
         config,
         hash,
@@ -1071,18 +1094,28 @@ function costChange(
 export type ChangeRow = PriceChange & { modelName: string; providerName: string; significant: boolean };
 export type ChangesView = { days: number; threshold: number; changes: ChangeRow[] };
 
-export function changeProfiles(snapshot: AppSnapshot, settings: Settings): (model: string) => { h: number; r: number } {
-  const q = savedQuery(settings);
+function modelProfiles(ctx: Ctx): Map<string, Profile> {
+  return new Map(
+    ctx.snapshot.models.map((input) => {
+      const mctx = modelCtx(ctx, input.slug);
+      return [input.slug, resolveProfile(input, mctx.settings, mctx.q)];
+    }),
+  );
+}
+
+export function changeProfiles(snapshot: AppSnapshot, settings: Settings, presets: ReadonlyMap<string, PresetSettings> = new Map()): (model: string) => { h: number; r: number } {
   const byModel = new Map(snapshot.models.map((m) => [m.slug, m]));
   return (model) => {
     const input = byModel.get(model);
-    return input ? resolveProfile(input, settings, q) : settings.defaultProfile;
+    if (!input) return settings.defaultProfile;
+    const own = modelSettings(settings, presets.get(model)?.overrides);
+    return resolveProfile(input, own, savedQuery(own));
   };
 }
 
-export function buildChanges(snapshot: AppSnapshot, settings: Settings, events: readonly PriceEvent[]): ChangesView {
+export function buildChanges(snapshot: AppSnapshot, settings: Settings, events: readonly PriceEvent[], presets: ReadonlyMap<string, PresetSettings> = new Map()): ChangesView {
   const byModel = new Map(snapshot.models.map((m) => [m.slug, m]));
-  const changes = priceChanges(events, changeProfiles(snapshot, settings)).map((c) => {
+  const changes = priceChanges(events, changeProfiles(snapshot, settings, presets)).map((c) => {
     const input = byModel.get(c.model);
     return {
       ...c,
@@ -1098,7 +1131,7 @@ export function spendChange(ctx: Ctx, before: ReadonlySet<string>, after: Readon
   const { snapshot, settings, q } = ctx;
   const vs = viewSettings(settings, q);
   const models = snapshot.models.map((input) => classifyModel(input, vs));
-  const profiles = new Map(snapshot.models.map((input) => [input.slug, resolveProfile(input, settings, q)]));
+  const profiles = modelProfiles(ctx);
   return costChange(models, profiles, before, after, q.days ?? settings.scenarios.days, settings);
 }
 

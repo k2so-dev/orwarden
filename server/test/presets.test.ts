@@ -17,14 +17,14 @@ describe("preset slugs", () => {
   });
 
   test("keep the slug of a synced preset when a collision appears later", () => {
-    const synced = { model: "a/llama", slug: null, autoSync: false, pinned: [], excluded: [], picked: null, syncedHash: "h", syncedAt: "2026-10-01T00:00:00Z" };
+    const synced = { model: "a/llama", slug: null, autoSync: false, pinned: [], excluded: [], picked: null, overrides: {}, syncedHash: "h", syncedAt: "2026-10-01T00:00:00Z" };
     const slugs = presetSlugs(["a/llama", "b/llama"], testConfig(), new Map([["a/llama", synced]]));
     expect(slugs.get("a/llama")).toBe("llama-safe");
     expect(slugs.get("b/llama")).toBe("b-llama-safe");
   });
 
   test("legacy synced presets with the same short name stay unique", () => {
-    const legacy = (m: string) => ({ model: m, slug: null, autoSync: false, pinned: [], excluded: [], picked: null, syncedHash: "h", syncedAt: "2026-10-01T00:00:00Z" });
+    const legacy = (m: string) => ({ model: m, slug: null, autoSync: false, pinned: [], excluded: [], picked: null, overrides: {}, syncedHash: "h", syncedAt: "2026-10-01T00:00:00Z" });
     const slugs = presetSlugs(["a/foo", "b/foo"], testConfig(), new Map([["a/foo", legacy("a/foo")], ["b/foo", legacy("b/foo")]]));
     expect(slugs.get("a/foo")).toBe("foo-safe");
     expect(slugs.get("b/foo")).toBe("b-foo-safe");
@@ -53,7 +53,7 @@ describe("preset slugs", () => {
   });
 
   test("avoid a custom slug taken by another model", () => {
-    const custom = { model: "x/other", slug: "llama-safe", autoSync: false, pinned: [], excluded: [], picked: null, syncedHash: null, syncedAt: null };
+    const custom = { model: "x/other", slug: "llama-safe", autoSync: false, pinned: [], excluded: [], picked: null, overrides: {}, syncedHash: null, syncedAt: null };
     const slugs = presetSlugs(["a/llama", "x/other"], testConfig(), new Map([["x/other", custom]]));
     expect(slugs.get("a/llama")).toBe("a-llama-safe");
     expect(slugs.get("x/other")).toBe("llama-safe");
@@ -65,25 +65,20 @@ describe("preset membership", () => {
   const profile: Profile = { name: "test", h: 0.8, r: 0.05, tools: false, inputPerDay: 1_000_000, estimated: false };
   const m = model(settings, "vendor/model", 1, [ep("a/fp8", 1, 2, 0.1), ep("b/fp8", 1.1, 2, 0.11), ep("c/fp8", 1.3, 2, 0.13)]);
   const scores = scoreEndpoints(m.endpoints, profile, m.endpoints, settings.scoring);
-  const pick = (preset: { pinned?: string[]; picked?: string[] | null } = {}, premium = 0.15) =>
-    rankForPreset(m, profile, new Set(), scores, { model: m.slug, slug: null, autoSync: false, pinned: preset.pinned ?? [], excluded: [], picked: preset.picked ?? null, syncedHash: null, syncedAt: null }, 5, false, "score", premium).map((e) => e.tag);
+  const pick = (preset: { pinned?: string[]; picked?: string[] | null } = {}, topN = 5) =>
+    rankForPreset(m, profile, new Set(), scores, { model: m.slug, slug: null, autoSync: false, pinned: preset.pinned ?? [], excluded: [], picked: preset.picked ?? null, overrides: {}, syncedHash: null, syncedAt: null }, topN, false, "score").map((e) => e.tag);
 
-  test("keeps only endpoints within the price premium of the cheapest", () => {
-    expect(pick()).toEqual(["a/fp8", "b/fp8"]);
-    expect(pick({}, 0.5).sort()).toEqual(["a/fp8", "b/fp8", "c/fp8"]);
-  });
-
-  test("fills slots dropped by the premium with the next endpoints that fit", () => {
+  test("lists the top N by score without dropping pricier endpoints", () => {
     const wide = model(settings, "vendor/wide", 1, [ep("a/fp8", 1, 2, 0.1), ep("b/fp8", 1.05, 2, 0.105), ep("c/fp8", 3, 2, 0.3), ep("d/fp8", 1.1, 2, 0.11)]);
     const base = scoreEndpoints(wide.endpoints, profile, wide.endpoints, settings.scoring);
     const overall: Record<string, number> = { "c/fp8": 90, "a/fp8": 80, "b/fp8": 70, "d/fp8": 60 };
     const ranked = new Map(wide.endpoints.map((e) => [e, { ...base.get(e)!, overall: overall[e.tag]! }]));
-    const tags = rankForPreset(wide, profile, new Set(), ranked, undefined, 2, false, "score", 0.15).map((e) => e.tag);
-    expect(tags).toEqual(["a/fp8", "b/fp8"]);
+    expect(rankForPreset(wide, profile, new Set(), ranked, undefined, 2, false, "score").map((e) => e.tag)).toEqual(["c/fp8", "a/fp8"]);
+    expect(pick().sort()).toEqual(["a/fp8", "b/fp8", "c/fp8"]);
   });
 
-  test("pinned and hand-picked endpoints bypass the premium", () => {
-    expect(pick({ pinned: ["c/fp8"] })).toEqual(["c/fp8", "a/fp8", "b/fp8"]);
+  test("pinned endpoints come first and hand-picked ones replace the ranking", () => {
+    expect(pick({ pinned: ["c/fp8"] }, 2)[0]).toBe("c/fp8");
     expect(pick({ picked: ["a/fp8", "c/fp8"] })).toEqual(["a/fp8", "c/fp8"]);
   });
 

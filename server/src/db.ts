@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { ProviderState } from "./core/hysteresis.ts";
+import type { ModelOverrides } from "./settings.ts";
 
 export type RunKind = "refresh" | "scheduled" | "apply" | "rollback";
 export type RunStatus = "ok" | "failed";
@@ -28,6 +29,7 @@ export type PresetSettings = {
   pinned: string[];
   excluded: string[];
   picked: string[] | null;
+  overrides: ModelOverrides;
   syncedHash: string | null;
   syncedAt: string | null;
 };
@@ -142,6 +144,7 @@ type PresetRow = {
   excluded: string;
   synced_hash: string | null;
   synced_at: string | null;
+  overrides: string;
 };
 
 const PICKED = "picked";
@@ -153,6 +156,7 @@ const toPreset = (r: PresetRow): PresetSettings => ({
   pinned: r.scenario === PICKED ? [] : JSON.parse(r.pinned),
   picked: r.scenario === PICKED ? JSON.parse(r.pinned) : null,
   excluded: JSON.parse(r.excluded),
+  overrides: JSON.parse(r.overrides),
   syncedHash: r.synced_hash,
   syncedAt: r.synced_at,
 });
@@ -171,6 +175,8 @@ export class Store {
     this.db.exec(SCHEMA);
     const columns = this.db.query<{ name: string }, []>("pragma table_info(endpoint_history)").all();
     if (!columns.some((c) => c.name === "verdict")) this.db.exec("alter table endpoint_history add column verdict text;");
+    const presetColumns = this.db.query<{ name: string }, []>("pragma table_info(presets)").all();
+    if (!presetColumns.some((c) => c.name === "overrides")) this.db.exec("alter table presets add column overrides text not null default '{}';");
   }
 
   getValue<T>(key: string): T | null {
@@ -438,10 +444,10 @@ export class Store {
   savePresetSettings(p: PresetSettings): void {
     this.db
       .query(
-        `insert into presets (model, slug, auto_sync, scenario, pinned, excluded, synced_hash, synced_at)
-         values ($model, $slug, $autoSync, $scenario, $pinned, $excluded, $syncedHash, $syncedAt)
+        `insert into presets (model, slug, auto_sync, scenario, pinned, excluded, overrides, synced_hash, synced_at)
+         values ($model, $slug, $autoSync, $scenario, $pinned, $excluded, $overrides, $syncedHash, $syncedAt)
          on conflict(model) do update set slug = excluded.slug, auto_sync = excluded.auto_sync, scenario = excluded.scenario,
-           pinned = excluded.pinned, excluded = excluded.excluded, synced_hash = excluded.synced_hash, synced_at = excluded.synced_at`,
+           pinned = excluded.pinned, excluded = excluded.excluded, overrides = excluded.overrides, synced_hash = excluded.synced_hash, synced_at = excluded.synced_at`,
       )
       .run({
         model: p.model,
@@ -450,6 +456,7 @@ export class Store {
         scenario: p.picked ? PICKED : null,
         pinned: JSON.stringify(p.picked ?? p.pinned),
         excluded: JSON.stringify(p.excluded),
+        overrides: JSON.stringify(p.overrides ?? {}),
         syncedHash: p.syncedHash,
         syncedAt: p.syncedAt,
       });

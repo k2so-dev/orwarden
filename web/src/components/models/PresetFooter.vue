@@ -5,33 +5,25 @@ import type { PresetView } from "@/lib/api";
 import { signedMoney, signedPct } from "@/lib/format";
 import { PRESET_SLUG_RE, patchPreset, renamePreset, resetPick, syncBusy, syncLabel, syncOne } from "@/lib/presetActions";
 import { cn } from "@/lib/utils";
-import { dryRun, settings, writeBlocked } from "@/stores/data";
+import { dryRun, writeBlocked } from "@/stores/data";
 import Tip from "@/components/app/Tip.vue";
 import { money } from "@/lib/format";
 import { CONFIDENCE, riskLines } from "@/lib/estimate";
 
 const props = defineProps<{ preset: PresetView }>();
 
-const topN = computed(() => settings.value?.presets.topN ?? 5);
-const premium = computed(() => settings.value?.presets.maxPremium ?? 0.15);
+const topN = computed(() => props.preset.topN);
 const blocked = computed(() => props.preset.status === "empty");
 const jsonOpen = ref(false);
 const json = computed(() => JSON.stringify(props.preset.config, null, 2));
 const min = computed(() => props.preset.policy.minQuantization);
 const held = computed(() => props.preset.ranked.filter((e) => e.held).length);
-const left = computed(() => {
-  const p = props.preset;
-  const listed = p.ranked.length - held.value;
-  const rest = p.eligibleCount - listed;
-  if (p.picked || listed >= topN.value) return null;
-  return rest > 0 ? `${rest} more eligible cost over +${Math.round(premium.value * 100)}%` : `only ${p.eligibleCount} eligible`;
-});
+const left = computed(() => (!props.preset.picked && props.preset.eligibleCount < topN.value ? `only ${props.preset.eligibleCount} eligible` : null));
 const line = computed(() => {
   const p = props.preset;
   const parts = [
     `${p.ranked.length} endpoint${p.ranked.length === 1 ? "" : "s"}`,
-    p.picked ? "ticked endpoints" : p.rankBy === "cost" ? "cheapest effective" : "top by score",
-    ...(p.picked ? [] : [`within +${Math.round(premium.value * 100)}% of cheapest`]),
+    p.picked ? "ticked endpoints" : p.rankBy === "cost" ? `top ${topN.value} cheapest effective` : `top ${topN.value} by score`,
     ...(left.value ? [left.value] : []),
     "no fixed order (cache-friendly)",
     ...(held.value > 0 ? [`${held.value} held while the cache is warm`] : []),
@@ -91,7 +83,7 @@ async function saveRename() {
         {{ estimateLabel }} · {{ estimate.confidence }}
       </Tip>
       <div class="ml-auto flex flex-wrap items-center gap-1.5">
-        <button v-if="preset.picked" type="button" class="inline-flex h-[30px] items-center rounded-lg px-3 text-[12.5px] font-medium hover:bg-accent" :title="`Drop the ticks and list up to ${topN} endpoints within +${Math.round(premium * 100)}% of the cheapest`" @click="resetPick(preset.model)">Reset to auto</button>
+        <button v-if="preset.picked" type="button" class="inline-flex h-[30px] items-center rounded-lg px-3 text-[12.5px] font-medium hover:bg-accent" :title="`Drop the ticks and list the top ${topN} endpoints`" @click="resetPick(preset.model)">Reset to top {{ topN }}</button>
         <div class="flex items-center gap-1.5 px-1.5" :title="dryRun ? 'Dry-run is on: scheduled refreshes only plan the write' : 'Scheduled refreshes rewrite this preset whenever its ranking changes'">
           <Toggle :model-value="preset.autoSync" label="Auto-sync" @update:model-value="patchPreset(preset.model, { autoSync: $event })" />
           <span class="text-[12.5px]">Auto-sync</span>

@@ -1,5 +1,5 @@
 import { computed, ref } from "vue";
-import { client, unwrap, type PresetView, type SyncResult } from "@/lib/api";
+import { client, unwrap, type PresetSettingsPatch, type PresetView, type SyncResult } from "@/lib/api";
 import { act, dryRun, presets, reloadAfterWrite } from "@/stores/data";
 import { confirmAction } from "@/stores/confirm";
 import { notify } from "@/stores/toast";
@@ -33,7 +33,7 @@ export const presetSummary = computed(() => {
   return text.length ? `Presets: ${text.join(" · ")}` : "";
 });
 
-export async function patchPreset(model: string, body: { autoSync?: boolean; picked?: string[] | null; slug?: string }): Promise<boolean> {
+export async function patchPreset(model: string, body: Omit<PresetSettingsPatch, "model">): Promise<boolean> {
   const res = await act(() => unwrap(client.presets.settings.$put({ json: { model, ...body } })));
   if (res) await reloadAfterWrite();
   return res !== null;

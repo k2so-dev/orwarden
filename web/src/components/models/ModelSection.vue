@@ -15,6 +15,8 @@ import Tip from "@/components/app/Tip.vue";
 import { overview, presets, presetsByModel, presetsFailed } from "@/stores/data";
 import EndpointTable from "./EndpointTable.vue";
 import PresetFooter from "./PresetFooter.vue";
+import ModelRules from "./ModelRules.vue";
+import { overrideLabels } from "@/lib/overrides";
 
 const props = defineProps<{ model: ModelView; defaultOpen: boolean }>();
 
@@ -43,6 +45,9 @@ const kindTip = computed(() => [
   { text: kind.value.hint, tone: "fg" as const },
   { text: `From ${usageDays.value}-day traffic: cache hit ${pct(props.model.h)}, output/input ${props.model.r.toFixed(2)}`, tone: "muted" as const },
 ]);
+
+const rules = computed(() => overrideLabels(props.model.overrides));
+const rulesTip = computed(() => [...rules.value.map((text) => ({ text, tone: "fg" as const })), { text: "Everything else follows the header. Change them under Model rules.", tone: "muted" as const }]);
 
 const estimate = computed(() => props.model.estimate);
 const estimateTip = computed(() => {
@@ -86,6 +91,7 @@ const densityModel = computed({
         <span class="text-[15px] font-semibold">{{ model.name }}</span>
         <span class="font-mono text-xs text-muted-foreground">{{ model.slug }}</span>
         <span class="self-center" @click.stop><Tip :title="`Detected workload: ${kind.label}`" :lines="kindTip" class="h-5 items-center rounded-full border border-border px-2 text-[11.5px] font-medium">{{ kind.label }}</Tip></span>
+        <span v-if="rules.length > 0" class="self-center" @click.stop><Tip title="Own rules for this model" :lines="rulesTip" class="h-5 items-center rounded-full border border-primary bg-primary/10 px-2 text-[11.5px] font-medium">{{ rules.length }} own rule{{ rules.length === 1 ? "" : "s" }}</Tip></span>
       </div>
       <div class="tnum flex flex-wrap gap-4 text-[12.5px] text-muted-foreground">
         <span>{{ usageDays }}-day spend <b class="font-semibold text-foreground">{{ money(model.usageUsd) }}</b></span>
@@ -135,6 +141,8 @@ const densityModel = computed({
         <span class="text-[13px] font-semibold">
           Endpoints <span class="font-normal text-muted-foreground">· tick rows to compose the preset · dimmed rows fail filters</span>
         </span>
+        <div class="flex items-center gap-1.5">
+        <ModelRules :model="model" />
         <Popover>
           <PopoverTrigger class="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 text-[12.5px] font-medium hover:bg-accent">
               <svg class="size-[13px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -161,6 +169,7 @@ const densityModel = computed({
             <Segmented v-model="densityModel" :options="DENSITY" size="sm" class="mx-1.5 mb-1 [&>button]:flex-1" />
           </PopoverContent>
         </Popover>
+        </div>
       </div>
       <EndpointTable :model="model" :horizon-label="horizonLabel" :preset="preset" />
       <PresetFooter v-if="preset" :preset="preset" />

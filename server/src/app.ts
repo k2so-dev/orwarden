@@ -11,7 +11,7 @@ import { listPresets, pinLegacySlugs, syncPresets, updatePresetSettings } from "
 import { refresh } from "./services/refresh.ts";
 import { AppError, type Runtime } from "./services/state.ts";
 import { HISTORY_DAYS } from "./db.ts";
-import { PRESET_SLUG_RE } from "./settings.ts";
+import { ModelOverridesSchema, PRESET_SLUG_RE } from "./settings.ts";
 
 const bool = z.enum(["true", "false"]).transform((v) => v === "true");
 const num = (min: number, max: number) => z.coerce.number().min(min).max(max);
@@ -42,6 +42,7 @@ const PresetSettingsBody = z.object({
   picked: z.array(z.string()).max(20).nullable().optional(),
   pinned: z.array(z.string()).max(20).optional(),
   excluded: z.array(z.string()).max(100).optional(),
+  overrides: ModelOverridesSchema.optional(),
 });
 
 const ok = { ok: true as const };
@@ -207,7 +208,7 @@ export function createApp(rt: Runtime) {
       const since = new Date(rt.now().getTime() - HISTORY_DAYS * 86_400_000).toISOString();
       return c.json({ days: HISTORY_DAYS, events: rt.store.priceEvents("", model), daily: rt.store.dailyHistory(model, since) });
     })
-    .get("/changes", (c) => c.json(buildChanges(rt.requireSnapshot(), rt.settings(), rt.store.priceEvents(""))))
+    .get("/changes", (c) => c.json(buildChanges(rt.requireSnapshot(), rt.settings(), rt.store.priceEvents(""), rt.store.presetSettings())))
     .get("/providers", zValidator("query", ViewQuerySchema), (c) =>
       c.json(
         buildProviders({

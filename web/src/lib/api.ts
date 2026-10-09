@@ -42,3 +42,4 @@ export type TrendData = InferResponseType<typeof client.trend.$get, 200>;
 export type ChangesView = InferResponseType<typeof client.changes.$get, 200>;
 export type ChangeRow = ChangesView["changes"][number];
 export type PresetSettingsPatch = InferRequestType<(typeof client.presets.settings)["$put"]>["json"];
+export type ModelOverrides = NonNullable<PresetSettingsPatch["overrides"]>;
